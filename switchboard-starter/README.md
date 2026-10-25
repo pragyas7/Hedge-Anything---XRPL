@@ -29,6 +29,27 @@ Describe a company → confirm exposures and risk budget → aggregate comparabl
 ## Safety and regulatory posture
 **No live US derivatives exchange, live unregistered derivatives matching, or automatic real-money trading is authorized by this repo.** Exchange order book and RFQ are testnet/paper modes until regulatory counsel and a licensed venue/clearing structure authorize deployment. Connectors enforce geographic/account/market eligibility. Polymarket International is read-only for US users. Ledger Agent Intent beta lacks XRPL EVM transaction support; treat Ledger hardware-signing integration as a separate, verified capability instead of inventing compatibility.
 
+## Judge demo
+
+Public one-shot proof: [https://switchboard-hackathon.vercel.app](https://switchboard-hackathon.vercel.app). The button runs analysis, a sandbox quote, `app_manual` approval, simulated orders, and a mock failover in one process. Orders stay `SIMULATED`. Failover stops at `VOUCHER_SIGNED` until AP4M credentials exist. The chain card is the public XRPL EVM testnet RPC unless `QUICKNODE_RPC_URL` is set. `ledger_agent_intent` stays unsupported on chain id 1449000.
+
+Local one-process page: `pnpm demo`, then [http://127.0.0.1:4110](http://127.0.0.1:4110). Before another Vercel deploy, run `pnpm bundle:demo` so `api/index.mjs` matches `server.ts`.
+
+## Sponsor progress
+
+Updated 2026-10-24. Team name for the AP4M portal is **Penn**. No agent key, QuickNode URL, AWS credentials, or Ledger device are configured. The rows below are code paths. They are not payments, QuickNode usage, an AWS deployment, or a device signature.
+
+| Sponsor | In the repo now | Still waiting | Paste later |
+| --- | --- | --- | --- |
+| Mastercard AP4M | Sign-in, voucher redeem, record-redemption, and settle live in `services/execution/src/ap4m-live.ts`. `settled` is true only when settle returns a 32-byte `payout_tx`. The sandbox proof still uses the mock failover and stops at `VOUCHER_SIGNED`. | Portal activation, agent key, funded testnet budget, merchant address that is not the agent wallet, channel id or cap, and a real HTTP 402 resource. | `AP4M_AGENT_PRIVATE_KEY`, `AP4M_MODE=live`, `AP4M_RESOURCE_URL`, and `AP4M_CHANNEL_ID` or `AP4M_CHANNEL_CAP`. Optional `AP4M_MERCHANT_ID`. |
+| QuickNode | Chain head and PaymentLedger `VoucherRedeemed` logs. The topic is the keccak256 of the event signature. The URL path is never returned. | An endpoint. Until then the label says the public XRPL EVM testnet RPC was used. | `QUICKNODE_RPC_URL` |
+| AWS AgentCore | `GET /ping` and `POST /invocations` on the demo process. `deployed` is hard-coded false. A 402 inside the cap calls the same AP4M payment function. A platform `AWS_REGION`, such as the one Vercel injects, is ignored until both the access key and the secret are set. | A runtime in AWS. Credentials alone do not create one, and this code does not SigV4-sign a call. | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AGENTCORE_RUNTIME_ARN` |
+| Ledger | Clear-sign preview format `switchboard.xrpl-clear-sign.v1` for TrustSet, OfferCreate, AMMDeposit, EscrowCreate, and Payment. Device status stays `deviceSeen: false` and `signed: false`. | A device and a verified XRPL EVM signing path. `ledger_agent_intent` stays unsupported on chain id 1449000. Chain id 1440000 is not used. | Nothing to paste yet. A device session is a later step. |
+
+Public routes on the demo: `GET /demo/sponsors`, `POST /demo/proof`, `GET /ping`, `POST /invocations`. The page itself walks through three steps: `POST /demo/analyze` reads the company description and limits, `POST /demo/quote` returns market quotes, sandbox order books, and a hedge plan without ordering anything, and `POST /demo/execute` (needs `confirm: true` and the reviewed plan) re-quotes, refuses if the legs changed or the premium rose, then approves with `app_manual`, places simulated orders, and runs the mock failover. The page markup lives in `demo/page.ts`. The invocation route refuses to use an agent key until `AP4M_ALLOW_PUBLIC_PAY=true`, and it accepts only `https` resource URLs. The execution service route `POST /v1/execution/ap4m/pay` (bearer plus `Idempotency-Key`) is the local pay entry. It returns the missing-variable list until the AP4M values above are set.
+
+The names to paste are listed in [`.env.example`](.env.example). Do not commit a filled `.env`.
+
 ## Local stack
 Node 20 and pnpm 9. From this directory:
 

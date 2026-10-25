@@ -1,0 +1,8 @@
+node_modules
+**/.next
+contracts/solidity/cache
+contracts/solidity/out
+contracts/solidity/lib
+**/.venv
+coverage
+.git

@@ -41,6 +41,7 @@ export async function proxyJson(args: {
   method: 'GET' | 'POST';
   body?: unknown;
   idempotencyKey?: string;
+  extraHeaders?: Record<string, string>;
   fetchImpl?: typeof fetch;
 }): Promise<ProxyResult> {
   const headers = new Headers();
@@ -52,6 +53,9 @@ export async function proxyJson(args: {
     idempotencyKey = args.idempotencyKey?.trim() || randomUUID();
     headers.set('Idempotency-Key', idempotencyKey);
     headers.set('Content-Type', 'application/json');
+  }
+  for (const [key, value] of Object.entries(args.extraHeaders ?? {})) {
+    if (value) headers.set(key, value);
   }
   const url = `${args.baseUrl}${args.path}`;
   const fetchImpl = args.fetchImpl ?? fetch;

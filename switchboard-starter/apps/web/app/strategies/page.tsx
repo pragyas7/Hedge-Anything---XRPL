@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import type { HedgePlan, MarketSearchResponse } from '@switchboard/contracts';
+import type { ExecutionRun, HedgePlan, MarketSearchResponse } from '@switchboard/contracts';
 import { presentApproval } from '../../server/approval';
 import { useDesk } from '../../components/desk-shell';
 import type { PlanMode } from '../../state/desk';
@@ -20,8 +20,9 @@ export default function StrategiesPage() {
   const [busy, setBusy] = useState<PlanMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readBasis, setReadBasis] = useState(false);
-  const [signedIntent, setSignedIntent] = useState('');
+  const [approveHash, setApproveHash] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
 
   if (!ready) return <div className="page"><p className="note" role="status">Loading desk…</p></div>;
   const company = state.analysis?.company;
@@ -92,7 +93,8 @@ export default function StrategiesPage() {
         maxTotalSpendUsd: plan.estimatedTotalCostUsd,
         maxCollateralUsd: plan.budgetUsd,
         allowedVenues: [...new Set(plan.legs.map((leg) => leg.venue))],
-        ap4mFallbackBudgetUsd: '0',
+        ap4mFallbackBudgetUsd: '25',
+        plan,
       }),
     });
     const body = await readJson(response);
@@ -122,7 +124,7 @@ export default function StrategiesPage() {
     const response = await fetch(`/api/execution/approvals/${encodeURIComponent(approvalId)}/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ method: 'app_manual', signedIntent }),
+      body: JSON.stringify({ method: 'app_manual', signedIntent: `app_manual:${plan.planHash}` }),
     });
     const body = await readJson(response);
     const view = presentApproval({
@@ -141,6 +143,38 @@ export default function StrategiesPage() {
       }, ...prev.activity],
     }));
     setSubmitting(false);
+  }
+
+  async function placeSandboxOrders() {
+    const approvalId = state.approval?.approvalId;
+    if (!plan || !approvalId) return;
+    setSubmitting(true);
+    setRunNote(null);
+    const idempotencyKey = crypto.randomUUID();
+    const response = await fetch('/api/execution/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+      body: JSON.stringify({ plan, approvalId, idempotencyKey }),
+    });
+    const body = await readJson(response);
+    setSubmitting(false);
+    if (!response.ok) {
+      setRunNote(messageOf(body, 'Execution did not place sandbox orders.'));
+      return;
+    }
+    const run = body as unknown as ExecutionRun;
+    setRunNote(`Run ${run.runId} is ${run.status}. Orders are sandbox records.`);
+    update((prev) => ({
+      ...prev,
+      lastRun: run,
+      activity: [{
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        kind: 'execution-run',
+        summary: `${run.runId} ${run.status}`,
+        source: 'execution',
+      }, ...prev.activity],
+    }));
   }
 
   const approval = state.approval && plan && state.approval.planId === plan.planId ? state.approval : null;
@@ -216,7 +250,7 @@ export default function StrategiesPage() {
         {plan ? (
           <>
             <p>Hash {plan.planHash}. Premium {plan.estimatedTotalCostUsd} USD. Venues {plan.legs.map((leg) => leg.venue).join(', ') || 'none'}.</p>
-            <p>AP4M fallback budget on this request is 0. Execution must accept the hash. A click here is not approval.</p>
+            <p>The preauthorized AP4M fallback budget on this request is 25 USD. Execution recomputes the hash from the plan snapshot. A click is not approval until execution returns APPROVED. This confirmation is app_manual, not a Ledger device signature.</p>
             <label className="field">
               <span><input type="checkbox" checked={readBasis} onChange={(event) => setReadBasis(event.target.checked)} /> I have read the basis risk and the sandbox limits.</span>
             </label>
@@ -227,12 +261,22 @@ export default function StrategiesPage() {
             {approval?.approvalId && approval.view.tone !== 'approved' ? (
               <>
                 <label className="field">
-                  <span>Type the plan id to confirm with execution</span>
-                  <input value={signedIntent} onChange={(event) => setSignedIntent(event.target.value)} />
+                  <span><input type="checkbox" checked={approveHash} onChange={(event) => setApproveHash(event.target.checked)} /> I approve hash {plan.planHash} with method app_manual. This is not a Ledger signature.</span>
                 </label>
-                <button className="btn" type="button" disabled={signedIntent !== plan.planId || submitting} onClick={confirmApproval}>
+                <button className="btn" type="button" disabled={!approveHash || submitting} onClick={confirmApproval}>
                   Confirm with execution
                 </button>
+              </>
+            ) : null}
+            {approval?.view.tone === 'approved' ? (
+              <>
+                <button className="btn" type="button" disabled={submitting} onClick={placeSandboxOrders}>
+                  Place sandbox orders
+                </button>
+                {runNote ? <p className="note" role="status">{runNote}</p> : null}
+                {state.lastRun && state.lastRun.planId === plan.planId ? (
+                  <p className="note">Latest run {state.lastRun.runId} is {state.lastRun.status}. Filled quantities are sandbox records, and receipt hashes stay unconfirmed.</p>
+                ) : null}
               </>
             ) : null}
           </>

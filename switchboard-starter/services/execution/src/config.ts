@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,14 +31,24 @@ function clean(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function firstExisting(paths: string[]): string | undefined {
+  return paths.find((candidate) => candidate.length > 0 && existsSync(candidate));
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const root = packageRoot();
   const privateKeyPath = clean(env.EXECUTION_AUTH_PRIVATE_KEY_PATH)
     ? path.resolve(env.EXECUTION_AUTH_PRIVATE_KEY_PATH as string)
-    : path.join(root, "dev-keys", "execution-auth-private.pem");
+    : firstExisting([
+      path.join(process.cwd(), "services/execution/dev-keys/execution-auth-private.pem"),
+      path.join(root, "dev-keys", "execution-auth-private.pem"),
+    ]) ?? path.join(root, "dev-keys", "execution-auth-private.pem");
   const publicKeyPath = clean(env.EXECUTION_AUTH_PUBLIC_KEY_PATH)
     ? path.resolve(env.EXECUTION_AUTH_PUBLIC_KEY_PATH as string)
-    : path.join(root, "dev-keys", "execution-auth-public.pem");
+    : firstExisting([
+      path.join(process.cwd(), "services/execution/dev-keys/execution-auth-public.pem"),
+      path.join(root, "dev-keys", "execution-auth-public.pem"),
+    ]) ?? path.join(root, "dev-keys", "execution-auth-public.pem");
   const port = Number(env.PORT ?? 4103);
   return {
     port: Number.isFinite(port) && port > 0 ? port : 4103,

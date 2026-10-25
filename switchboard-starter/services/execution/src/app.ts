@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply } from "fastify";
 import { createAp4mClient, type Ap4mPaymentClient } from "./ap4m.js";
+import { runAp4mPayment } from "./ap4m-live.js";
+import { SAMPLE_XRPL_TRANSACTIONS, previewXrplTransaction } from "./clear-sign.js";
 import { loadConfig, type AppConfig } from "./config.js";
+import { readNetwork } from "./network.js";
+import { sponsorStatus } from "./sponsors.js";
 import { apiError, correlationId, headerString, HttpError, type HandlerResult } from "./errors.js";
 import { confirmApproval, createApproval, createRun, getRun, readNow, type ServiceContext } from "./execution.js";
 import { armFailover, disableFailover, FAILOVER_QUOTE_HEADER, FAILOVER_SCENARIO_HEADER, getFailover, simulateFailover } from "./failover.js";
@@ -81,6 +85,33 @@ export async function buildApp(options: BuildAppOptions = {}) {
   });
 
   app.get("/healthz", async () => ({ status: "ok", service: "execution", version: config.serviceVersion }));
+
+  app.get("/v1/execution/network", async () => readNetwork(process.env));
+
+  app.get("/v1/execution/sponsors", async () => sponsorStatus(process.env));
+
+  app.post("/v1/execution/ap4m/pay", async (request, reply) => {
+    const correlation = correlationId(request.headers, () => `corr_${randomUUID()}`);
+    const headerKey = headerString(request.headers["idempotency-key"]);
+    if (!headerKey) {
+      return reply.code(400).send(apiError("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key is required.", correlation, false));
+    }
+    const report = await runAp4mPayment(process.env);
+    return { correlationId: correlation, ...report };
+  });
+
+  app.get("/v1/execution/clear-sign/samples", async () => ({
+    disclaimer: previewXrplTransaction(SAMPLE_XRPL_TRANSACTIONS[0]).disclaimer,
+    previews: SAMPLE_XRPL_TRANSACTIONS.map((tx) => previewXrplTransaction(tx)),
+  }));
+
+  app.post("/v1/execution/clear-sign/preview", async (request, reply) => {
+    const correlation = correlationId(request.headers, () => `corr_${randomUUID()}`);
+    if (!isRecord(request.body) || !isRecord(request.body.tx)) {
+      return reply.code(400).send(apiError("VALIDATION_ERROR", "Body must be { tx: XRPL transaction object }.", correlation, false));
+    }
+    return { preview: previewXrplTransaction(request.body.tx) };
+  });
 
   app.get("/.well-known/execution-jwks.json", async () => tokens.jwks());
 

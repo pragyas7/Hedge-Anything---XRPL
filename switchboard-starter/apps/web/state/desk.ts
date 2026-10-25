@@ -1,4 +1,4 @@
-import type { CompanyAnalysisResponse, HedgePlan } from '@switchboard/contracts';
+import type { CompanyAnalysisResponse, ExecutionRun, FailoverRun, HedgePlan } from '@switchboard/contracts';
 import type { ApprovalView } from '../server/approval';
 
 export type PlanMode = 'min_cvar' | 'min_cost' | 'balanced';
@@ -24,6 +24,8 @@ export interface DeskState {
   marketNote: string | null;
   marketSource: 'markets' | 'fixture' | null;
   approval: StoredApproval | null;
+  lastRun: ExecutionRun | null;
+  lastFailover: FailoverRun | null;
   activity: ActivityItem[];
 }
 
@@ -37,6 +39,8 @@ export function emptyDesk(): DeskState {
     marketNote: null,
     marketSource: null,
     approval: null,
+    lastRun: null,
+    lastFailover: null,
     activity: [],
   };
 }
