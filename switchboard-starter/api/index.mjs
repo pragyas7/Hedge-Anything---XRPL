@@ -847,7 +847,8 @@ function renderPage(previews) {
 
     /* Top bar */
     .topbar { position: sticky; top: 0; z-index: 20; height: 56px; display: flex; align-items: center; gap: 1rem; padding: 0 1.5rem; background: rgba(0, 0, 0, 0.75); backdrop-filter: saturate(160%) blur(12px); border-bottom: 1px solid var(--line); }
-    .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; }
+    .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; color: var(--text); text-decoration: none; }
+    .brand:hover .mark { box-shadow: 0 0 0 3px var(--yellow-dim); }
     .mark { width: 20px; height: 20px; border-radius: 6px; background: var(--yellow); position: relative; }
     .mark::after { content: ""; position: absolute; left: 5px; right: 5px; top: 9px; height: 2px; border-radius: 1px; background: #000; box-shadow: 0 -4px 0 #000, 0 4px 0 #000; }
     .top-right { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
@@ -1140,7 +1141,7 @@ function renderPage(previews) {
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="mark" aria-hidden="true"></span>Switchboard</div>
+  <a class="brand" href="/" title="Start over"><span class="mark" aria-hidden="true"></span>Switchboard</a>
   <div class="top-right">
     <span class="sandbox"><i aria-hidden="true"></i><span id="mode-lamp-text">Sandbox hedge</span></span>
     <button class="btn btn-ghost" type="button" id="sample">Run sample</button>
