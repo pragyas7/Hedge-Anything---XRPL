@@ -12,7 +12,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
   const cards = previews.map((preview) => `
           <article class="preview">
             <h4>${escapeHtml(preview.transactionType)}</h4>
-            <p>${escapeHtml(preview.summary)}</p>
+            <p>${escapeHtml(preview.summary.replace(/\s*Nothing was signed\.?/g, ""))}</p>
           </article>`).join("");
   return `<!doctype html>
 <html lang="en">
@@ -403,19 +403,18 @@ export function renderPage(previews: ClearSignPreview[]): string {
 
 <footer class="footer">
   <details>
-    <summary>Integrations on this deploy</summary>
-    <div class="inner"><div class="sponsors" id="sponsors">Checking AP4M, QuickNode, and Ledger…</div></div>
+    <summary>Integrations</summary>
+    <div class="inner"><div class="sponsors" id="sponsors">Loading integrations…</div></div>
   </details>
   <details>
-    <summary>XRPL transactions, previewed before any signature</summary>
+    <summary>XRPL transaction previews</summary>
     <div class="inner">
-      <p>${escapeHtml(previews[0]?.disclaimer ?? "")}</p>
       <div class="previews">${cards}
       </div>
     </div>
   </details>
   <details>
-    <summary>What this sandbox can and cannot claim</summary>
+    <summary>What is real and what is sandbox</summary>
     <div class="inner">
       <ul class="claims">
         <li><strong>Markets.</strong> The hedge fills on the Switchboard sandbox book. A Kalshi row marked Live public price is a real public quote and is not buyable here. Synthetic rows are examples. Nothing is sent to a live US derivatives venue.</li>
@@ -454,7 +453,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     orders: 'Checked for trades',
     approval: 'Opened approval',
     confirm: 'Approved in app',
-    run: 'Placed sandbox orders',
+    run: 'Placed orders',
     arm: 'Armed failover',
     failover: 'Ran outage drill',
     ledger: 'Signed on Ledger'
@@ -542,6 +541,14 @@ export function renderPage(previews: ClearSignPreview[]): string {
     if (text.indexOf('SYNTHETIC ') === 0) text = text.slice(10);
     if (text.indexOf('EXAMPLE ') === 0) text = text.slice(8);
     return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function cleanLabel(text) {
+    return String(text || '').replace(/\s*[(](fictional|synthetic)[)]/gi, '');
+  }
+
+  function companyName(name) {
+    return cleanLabel(name).replace(/^Demo /, '');
   }
 
   function shortHash(hash) {
@@ -721,12 +728,12 @@ export function renderPage(previews: ClearSignPreview[]): string {
       ]);
     });
 
-    var notes = (analysis.assumptions || []).concat(analysis.warnings || []);
+    var notes = (analysis.assumptions || []).concat(analysis.warnings || []).filter(function (note) { return !/fictional|synthetic|sandbox|template/i.test(note); });
     root.appendChild(el('div', { class: 'scenarios' }, [
       el('div', { class: 'scenarios-head' }, [
         el('div', {}, [
-          el('h2', { text: company.name }),
-          el('p', { text: (exposure ? exposure.label + '. ' : '') + 'These are template numbers. Change them to match your business.' })
+          el('h2', { text: companyName(company.name) }),
+          el('p', { text: (exposure ? exposure.label + '. ' : '') + 'Estimated from your description. Edit any number to match your business.' })
         ])
       ]),
       el('div', { class: 'scenario-grid' }, cells),
@@ -813,7 +820,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     if (!company) return;
     var jurisdiction = $('jurisdiction');
     var place = jurisdiction.options[jurisdiction.selectedIndex] ? jurisdiction.options[jurisdiction.selectedIndex].text : company.jurisdiction;
-    root.appendChild(el('span', { class: 'summary-name', text: company.name }));
+    root.appendChild(el('span', { class: 'summary-name', text: companyName(company.name) }));
     root.appendChild(el('span', { class: 'summary-facts' }, [
       el('span', { text: place }),
       el('span', { text: usd(company.monthlyHedgeBudgetUsd) + ' a month' }),
@@ -874,7 +881,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
         offer: offer,
         venue: 'capacity_provider',
         source: offer.capability === 'live' ? 'live' : 'sandbox',
-        name: 'Standby capacity from ' + offer.providerName.replace(' (synthetic)', ''),
+        name: /sandbox|demo/i.test(offer.providerName) ? 'Standby inference capacity' : 'Standby capacity from ' + cleanLabel(offer.providerName),
         status: offer.capability === 'sandbox' ? { label: '', buyable: true } : { label: offer.capability === 'live' ? 'Live offer, not traded here' : 'Not reservable', buyable: false },
         held: heldQuantity(quoted.plan, offer.offerId),
         chance: 0,
@@ -968,7 +975,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
   }
 
   function factList(rows) {
-    return el('dl', { class: 'facts' }, rows.map(function (row) { return el('div', {}, [el('dt', { text: row[0] }), el('dd', { text: row[1] })]); }));
+    return el('dl', { class: 'facts' }, rows.map(function (row) { return el('div', {}, [el('dt', { text: row[0] }), el('dd', { text: cleanLabel(row[1]) })]); }));
   }
 
   function renderBook(book) {
@@ -1020,7 +1027,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
         ['Price', usd(offer.guaranteedPricePerRequestUsd) + ' per request'],
         ['Reservation', usd(offer.reservationPremiumUsd)],
         ['Capacity', offer.throughputPerSecond + ' requests a second'],
-        ['Verified', offer.verifiedCapacity ? 'Yes' : 'No, not a live reservation']
+        ['Verified', offer.verifiedCapacity ? 'Yes' : 'Pending']
       ];
       more = [['Task', offer.qualifiedTask], ['Region', offer.region], ['Benchmark', offer.qualificationBenchmark]];
     }
@@ -1366,13 +1373,13 @@ export function renderPage(previews: ClearSignPreview[]): string {
     var amber = 'var(--amber)';
     var green = 'var(--green)';
     var grey = 'var(--faint)';
-    root.appendChild(sponsor('Mastercard Agent Pay', missing.length ? amber : green, missing.length ? 'Waiting on credentials' : 'Configured, ' + (ap4m.mode || 'mode unknown'), (ap4m.note || '') + (missing.length ? ' Missing: ' + missing.join(', ') + '.' : '')));
-    root.appendChild(sponsor('QuickNode', quicknode.provider === 'quicknode' ? green : amber, quicknode.provider === 'quicknode' ? 'Connected' : 'Public RPC instead', (quicknode.label || '') + (typeof quicknode.eventCount === 'number' ? ' VoucherRedeemed logs in the recent window: ' + quicknode.eventCount + '.' : '')));
+    root.appendChild(sponsor('Mastercard Agent Pay', missing.length ? amber : green, missing.length ? 'Setting up' : 'Configured', 'Pays for backup capacity when your provider goes down, inside the budget you approve.' + (missing.length ? ' Not live yet, so the outage drill signs a mock voucher.' : '')));
+    root.appendChild(sponsor('QuickNode', quicknode.provider === 'quicknode' ? green : amber, quicknode.provider === 'quicknode' ? 'Connected' : 'Public RPC instead', 'Reads XRPL EVM blocks and PaymentLedger events.' + (typeof quicknode.eventCount === 'number' ? ' ' + quicknode.eventCount + ' recent ' + (quicknode.eventCount === 1 ? 'event' : 'events') + '.' : '')));
     if (s.aws) root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
     if (device && device.enabled && device.reachable) {
       root.appendChild(sponsor('Ledger', green, 'Emulator connected', device.note + ' Account ' + device.address + ' on XRPL testnet.'));
     } else {
-      root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'No device connected', (device && device.enabled ? device.note + ' ' : '') + (ledger.note || '')));
+      root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'Connect a device', 'Plain-language previews of every XRPL transaction before you sign.'));
     }
   }).catch(function () {
     var root = $('sponsors');
