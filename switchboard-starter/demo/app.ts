@@ -5,7 +5,9 @@
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { Decimal } from "decimal.js";
+import type { MarketQuote } from "../packages/contracts/src/index.js";
 import Fastify, { type FastifyInstance } from "fastify";
+import { discoverRisks, discoveryEnabled, liveQuotes } from "./discover.js";
 import { LedgerApprover, ledgerConfig, type LedgerApproval } from "./ledger.js";
 import { renderPage } from "./page.js";
 import { awsAgentCoreEnabled, handleInvocation } from "../services/execution/src/aws-agentcore.js";
@@ -298,6 +300,21 @@ export async function createDemoApp() {
       monthlyHedgeBudgetUsd,
       maxTolerableTailLossUsd,
     });
+    // The built-in demo companies keep their tuned templates. Anything else goes to Claude for
+    // risk discovery, and falls back to the template answer if that fails.
+    const templateCompany = isRecord(analyzed.body) && isRecord(analyzed.body.company) ? analyzed.body.company : null;
+    const isBuiltInDemo = templateCompany?.companyId === "co_demo_ai" || templateCompany?.companyId === "co_retail_demo";
+    if (analyzed.status === 200 && !isBuiltInDemo && discoveryEnabled(process.env)) {
+      const discovered = await discoverRisks({
+        description: String(description),
+        jurisdiction: String(jurisdiction),
+        budget: String(monthlyHedgeBudgetUsd),
+        tail: String(maxTolerableTailLossUsd),
+      });
+      if (discovered) {
+        return { ...discovered.analysis, discovery: { insights: discovered.insights, markets: discovered.markets } };
+      }
+    }
     return reply.code(analyzed.status).send(analyzed.body);
   });
 
@@ -305,7 +322,8 @@ export async function createDemoApp() {
   gateway.post("/demo/quote", async (request, reply) => {
     const input = readPlanInput(request.body);
     if (typeof input === "string") return reply.code(400).send({ message: input });
-    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, []);
+    const extra = await liveQuotes(isRecord(request.body) ? request.body.liveMarkets : undefined, REQUESTED_QUANTITY);
+    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, [], extra);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message });
     return { search: quoted.search, plan: quoted.plan, books: quoted.books };
   });
@@ -330,7 +348,8 @@ export async function createDemoApp() {
       return reply.code(400).send({ message: "Ledger approval is not configured on this deploy. Approve in the app instead." });
     }
     const steps: Step[] = [];
-    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps);
+    const extra = await liveQuotes(request.body.liveMarkets, REQUESTED_QUANTITY);
+    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps, extra);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message, steps });
     if (!sameTerms(reviewed, quoted.plan)) {
       return reply.code(409).send({
@@ -437,6 +456,7 @@ async function quoteAndPlan(
   company: Record<string, unknown>,
   mode: PlanMode,
   steps: Step[],
+  extraQuotes: MarketQuote[] = [],
 ): Promise<Quoted> {
   const exposureIds = Array.isArray(company.exposures)
     ? company.exposures.map((exposure) => isRecord(exposure) && typeof exposure.exposureId === "string" ? exposure.exposureId : "").filter(Boolean)
@@ -451,6 +471,10 @@ async function quoteAndPlan(
   steps.push({ name: "search", status: search.status, detail: detailOf(search.body, "search") });
   if (search.status !== 200) {
     return { ok: false, stage: "search", status: search.status, message: messageOf(search.body, "Market search failed. No plan was created.") };
+  }
+  if (extraQuotes.length > 0 && isRecord(search.body) && Array.isArray(search.body.quotes)) {
+    // Live Kalshi contracts that track this business's own exposures go first. They are read only.
+    search.body.quotes = [...extraQuotes, ...search.body.quotes];
   }
 
   const generated = await call(strategy, "POST", "/v1/strategies/generate", {

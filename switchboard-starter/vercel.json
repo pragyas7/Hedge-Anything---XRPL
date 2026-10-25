@@ -1,11 +1,14 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api?path=$1" }
+    {
+      "source": "/(.*)",
+      "destination": "/api?path=$1"
+    }
   ],
   "functions": {
     "api/index.mjs": {
       "includeFiles": "{services/execution/dev-keys/**,services/markets/dev-keys/**,fixtures/**}",
-      "maxDuration": 15
+      "maxDuration": 60
     }
   }
 }

@@ -117,10 +117,34 @@ export function renderPage(previews: ClearSignPreview[]): string {
 
     /* Scenarios */
     .scenarios { margin-top: 2.5rem; }
+    .thinking { margin-top: 2.5rem; border: 1px solid var(--line-2); border-radius: 16px; padding: 1.4rem 1.5rem; background: linear-gradient(180deg, rgba(250, 204, 21, 0.05), rgba(10, 10, 10, 0.6)); }
+    .thinking-head { display: flex; align-items: center; gap: 0.75rem; font-weight: 600; font-size: 15px; }
+    .orb { width: 14px; height: 14px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.6); animation: pulse 1.6s ease-out infinite; flex: none; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.55); } 80% { box-shadow: 0 0 0 14px rgba(250, 204, 21, 0); } 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); } }
+    .thinking-steps { list-style: none; margin: 1.1rem 0 0; padding: 0; display: grid; gap: 0.55rem; }
+    .thinking-steps li { display: flex; align-items: center; gap: 0.65rem; font-size: 13.5px; color: var(--faint); transition: color 300ms ease; }
+    .thinking-steps li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); flex: none; transition: background 300ms ease; }
+    .thinking-steps li.on { color: var(--text); }
+    .thinking-steps li.on::before { background: var(--yellow); box-shadow: 0 0 10px rgba(250, 204, 21, 0.6); }
+    .thinking-steps li.done { color: var(--muted); }
+    .thinking-steps li.done::before { background: var(--green); }
+    .thinking-bar { height: 2px; border-radius: 1px; margin-top: 1.2rem; background: linear-gradient(90deg, transparent, var(--yellow), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sweep 1.4s ease-in-out infinite; }
+    @keyframes sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+    .insights { margin-top: 2.5rem; }
+    .insights h2 { font-size: 15px; display: flex; align-items: center; gap: 0.5rem; }
+    .insights h2 i { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-dim); }
+    .insights > p { color: var(--muted); font-size: 13px; margin-top: 0.25rem; }
+    .insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+    .insight { border: 1px solid var(--line-2); border-radius: 14px; padding: 1rem 1.05rem; background: var(--raised); }
+    .insight h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .insight p { font-size: 13px; color: var(--muted); margin-top: 0.45rem; line-height: 1.55; }
+    .insight .bad { margin-top: 0.7rem; font-size: 12.5px; color: var(--text); }
+    .insight .bad b { color: var(--yellow); font-weight: 500; }
+    .insight .mk { margin-top: 0.4rem; font-size: 12px; color: var(--faint); }
     .scenarios-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.9rem; }
     .scenarios-head h2 { font-size: 15px; }
     .scenarios-head p { color: var(--muted); font-size: 13px; margin-top: 0.2rem; }
-    .scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
     .scenario { padding: 1rem 1rem 1rem 0; }
     .scenario + .scenario { padding-left: 1rem; border-left: 1px solid var(--line); }
     .scenario-label { font-size: 13px; color: var(--muted); min-height: 2.6em; line-height: 1.35; }
@@ -387,7 +411,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     <span>Try</span>
     <button type="button" data-example="0">AI support desk</button>
     <button type="button" data-example="1">Voice agent on a GPU cloud</button>
-    <button type="button" data-example="2">Coastal retailer</button>
+    <button type="button" data-example="2">Ice cream shop in New York</button>
   </div>
   <div class="intro-msg" id="intro-msg"></div>
   <div id="scenarios"></div>
@@ -431,7 +455,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
   var EXAMPLES = [
     'Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.',
     'Voice agent startup running LLM inference on one GPU cloud provider, where an outage or token price spike hurts margins',
-    'Coastal retailer with storm-related delivery delays when a warehouse closes'
+    'Ice cream shop in New York'
   ];
   var MODES = [['min_cvar', 'Worst case'], ['balanced', 'Balanced'], ['min_cost', 'Lowest cost']];
   var VENUE = {
@@ -473,6 +497,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     notice: null,
     error: null,
     busy: false,
+    discovery: null,
     ledgerStatus: null,
     approveWith: 'ledger'
   };
@@ -612,6 +637,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     clear($('intro-msg'));
     if (!state.analysis) return;
     state.analysis = null;
+    state.discovery = null;
     state.confirmed = false;
     state.phase = 'draft';
     clear($('scenarios'));
@@ -658,12 +684,15 @@ export function renderPage(previews: ClearSignPreview[]): string {
     clear(button);
     button.appendChild(el('span', { class: 'spinner', 'aria-hidden': 'true' }));
     button.appendChild(document.createTextNode('Analyzing'));
+    var loader = thinkingPanel();
+    $('scenarios').appendChild(loader.node);
     var result = await post('/demo/analyze', {
       description: description,
       jurisdiction: $('jurisdiction').value,
       monthlyHedgeBudgetUsd: budget,
       maxTolerableTailLossUsd: tail
     });
+    loader.stop();
     state.busy = false;
     button.disabled = false;
     if (!result.ok || !result.body.company) {
@@ -672,12 +701,60 @@ export function renderPage(previews: ClearSignPreview[]): string {
       return;
     }
     state.analysis = result.body;
+    state.discovery = result.body.discovery || null;
     state.confirmed = false;
     state.quoted = null;
     state.result = null;
     state.phase = 'review';
     render();
   });
+
+    // Shown while the analyzer works. The steps describe what the server is actually doing.
+  function thinkingPanel() {
+    var steps = [
+      'Reading the business',
+      'Working out what moves its monthly P&L',
+      'Scanning 458 live Kalshi weather and climate markets',
+      'Matching contracts that pay out in the bad case',
+      'Sizing losses and chances for each scenario'
+    ];
+    var items = steps.map(function (text) { return el('li', { text: text }); });
+    var index = 0;
+    items[0].className = 'on';
+    var timer = setInterval(function () {
+      if (index >= items.length - 1) return;
+      items[index].className = 'done';
+      index += 1;
+      items[index].className = 'on';
+    }, 2600);
+    return {
+      node: el('div', { class: 'thinking', role: 'status', 'aria-live': 'polite' }, [
+        el('div', { class: 'thinking-head' }, [el('span', { class: 'orb', 'aria-hidden': 'true' }), 'Switchboard is analyzing your business']),
+        el('ol', { class: 'thinking-steps' }, items),
+        el('div', { class: 'thinking-bar', 'aria-hidden': 'true' })
+      ]),
+      stop: function () { clearInterval(timer); if (this.node && this.node.parentNode) this.node.parentNode.removeChild(this.node); }
+    };
+  }
+
+  function renderInsights() {
+    var found = state.discovery;
+    if (!found || !found.insights || !found.insights.length) return null;
+    var markets = found.markets || [];
+    return el('section', { class: 'insights' }, [
+      el('h2', {}, [el('i', { 'aria-hidden': 'true' }), 'What Switchboard noticed']),
+      el('p', { text: 'Risks in your P&L, including the ones that are easy to miss, and the live markets that pay out when they hit.' }),
+      el('div', { class: 'insight-grid' }, found.insights.map(function (item) {
+        var count = markets.filter(function (m) { return m.exposureId === item.exposureId; }).length;
+        return el('article', { class: 'insight' }, [
+          el('h3', { text: item.label }),
+          el('p', { text: item.insight }),
+          el('div', { class: 'bad' }, ['Bad case: ', el('b', { text: item.badOutcome })]),
+          el('div', { class: 'mk', text: count ? count + (count === 1 ? ' live Kalshi market matched' : ' live Kalshi markets matched') : 'No listed market tracks this yet' })
+        ]);
+      }))
+    ]);
+  }
 
   /* Scenarios */
 
@@ -729,6 +806,8 @@ export function renderPage(previews: ClearSignPreview[]): string {
     });
 
     var notes = (analysis.assumptions || []).concat(analysis.warnings || []).filter(function (note) { return !/fictional|synthetic|sandbox|template/i.test(note); });
+    var insights = renderInsights();
+    if (insights) root.appendChild(insights);
     root.appendChild(el('div', { class: 'scenarios' }, [
       el('div', { class: 'scenarios-head' }, [
         el('div', {}, [
@@ -780,7 +859,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     state.notice = null;
     render();
     toTop();
-    var result = await post('/demo/quote', { company: state.analysis.company, mode: state.mode });
+    var result = await post('/demo/quote', { company: state.analysis.company, mode: state.mode, liveMarkets: state.discovery ? state.discovery.markets : [] });
     state.busy = false;
     if (!result.ok || !result.body.plan) {
       state.phase = 'error';
@@ -1217,7 +1296,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     go.appendChild(document.createTextNode(method === 'ledger' ? 'Waiting for the Ledger' : 'Approving'));
     var panel = method === 'ledger' ? devicePanel(plan.planHash) : null;
     if (panel) $('run-status').appendChild(panel.node);
-    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true, approval: method === 'ledger' ? 'ledger' : 'app' });
+    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true, liveMarkets: state.discovery ? state.discovery.markets : [], approval: method === 'ledger' ? 'ledger' : 'app' });
     if (panel) panel.stop();
     state.busy = false;
     if (result.status === 409 && result.body.requote && result.body.plan) {
@@ -1323,6 +1402,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
       return;
     }
     state.analysis = { company: body.company, assumptions: [], warnings: [] };
+    state.discovery = null;
     state.confirmed = true;
     if (body.plan) acceptQuote({ search: body.marketSearch, plan: body.plan, books: body.books });
     else { state.phase = 'error'; state.error = body.note || 'The sample run did not return a plan.'; }

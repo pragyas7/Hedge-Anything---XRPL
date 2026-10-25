@@ -119,6 +119,427 @@ import { request as httpRequest } from "node:http";
 import { Decimal as Decimal5 } from "decimal.js";
 import Fastify4 from "fastify";
 
+// demo/discover.ts
+import { createHash } from "node:crypto";
+import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
+
+// demo/precomputed.ts
+var PRECOMPUTED = {
+  "ice cream shop in new york": {
+    "generatedAt": "2026-10-25T16:43:45.486Z",
+    "model": "claude-opus-5-5",
+    "discovery": {
+      "companyName": "Ice cream shop (New York)",
+      "exposures": [
+        {
+          "label": "Rainy weekends and wet months",
+          "description": "Rain kills walk-in foot traffic, especially on weekend evenings when most sales happen.",
+          "category": "climate",
+          "insight": "Owners think about cold, but a wet month can hurt more than a cool one because people simply don't walk past your window. A few rainy Saturdays can wipe out a big share of the month's profit.",
+          "badOutcome": "NYC monthly rain above 5 inches",
+          "direction": "above",
+          "threshold": 5,
+          "seriesTickers": [
+            "KXRAINNYCM",
+            "KXRAINDNYC",
+            "KXRAINNYCW"
+          ]
+        },
+        {
+          "label": "Cool summer days",
+          "description": "Daily highs below seasonal norms cut cone and pint sales sharply.",
+          "category": "climate",
+          "insight": "Sales fall off fast when the high drops below about 75\xB0F. A cool stretch in June or August means lower sales while you still pay full staff and rent.",
+          "badOutcome": "NYC daily high below 75\xB0F",
+          "direction": "below",
+          "threshold": 75,
+          "seriesTickers": [
+            "KXHIGHNY",
+            "KXWEEKHTNYC",
+            "KXTEMPNYCH"
+          ]
+        },
+        {
+          "label": "Extreme heat straining freezers and power",
+          "description": "Heat waves push freezers and compressors to failure and raise the risk of grid outages that melt inventory.",
+          "category": "operational",
+          "insight": "A very hot day sounds like a great sales day, but above about 97\xB0F old freezers struggle and blackouts get more likely. One failure can spoil thousands of dollars of product overnight.",
+          "badOutcome": "NYC daily high above 97\xB0F",
+          "direction": "above",
+          "threshold": 97,
+          "seriesTickers": [
+            "KXHIGHNY",
+            "KXHEATWARNING"
+          ]
+        },
+        {
+          "label": "Dairy and sugar cost spikes",
+          "description": "Cream and butterfat prices swing and squeeze margins.",
+          "category": "commodity",
+          "insight": "Cream prices can jump 20\u201330% in a season, and most shops don't raise menu prices fast enough to keep up.",
+          "badOutcome": "Wholesale cream prices spike",
+          "direction": "above",
+          "threshold": null,
+          "seriesTickers": []
+        }
+      ],
+      "scenarios": [
+        {
+          "label": "Normal month",
+          "probability": 0.6,
+          "lossUsd": 0,
+          "exposureIndex": -1
+        },
+        {
+          "label": "Very wet month with rainy weekends",
+          "probability": 0.15,
+          "lossUsd": 5e3,
+          "exposureIndex": 0
+        },
+        {
+          "label": "Cool stretch in peak season",
+          "probability": 0.15,
+          "lossUsd": 4e3,
+          "exposureIndex": 1
+        },
+        {
+          "label": "Heat wave freezer failure or outage",
+          "probability": 0.05,
+          "lossUsd": 7e3,
+          "exposureIndex": 2
+        },
+        {
+          "label": "Dairy cost spike",
+          "probability": 0.05,
+          "lossUsd": 2500,
+          "exposureIndex": 3
+        }
+      ]
+    }
+  }
+};
+
+// demo/discover.ts
+var MODEL = "claude-opus-5-5";
+var KALSHI = (process.env.KALSHI_API_BASE ?? "https://external-api.kalshi.com/trade-api/v2").replace(/\/+$/, "");
+var CATALOG_CATEGORY = "Climate and Weather";
+var CATALOG_TTL_MS = 30 * 6e4;
+var DISCOVERY_TIMEOUT_MS = 4e4;
+var KALSHI_TIMEOUT_MS = 6e3;
+var TICKER = /^[A-Z0-9][A-Z0-9.\-]{1,63}$/;
+var CATEGORIES = ["operational", "digital", "climate", "commodity", "supply_chain", "regulatory", "financial", "other"];
+var DiscoverySchema = z.object({
+  companyName: z.string(),
+  exposures: z.array(z.object({
+    label: z.string(),
+    description: z.string(),
+    category: z.enum(CATEGORIES),
+    insight: z.string(),
+    badOutcome: z.string(),
+    direction: z.enum(["below", "above", "unclear"]),
+    threshold: z.number().nullable(),
+    seriesTickers: z.array(z.string())
+  })),
+  scenarios: z.array(z.object({
+    label: z.string(),
+    probability: z.number(),
+    lossUsd: z.number(),
+    exposureIndex: z.number().transform((value) => Math.round(value))
+  }))
+});
+function discoveryKey(description) {
+  return description.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+var catalogCache = null;
+function discoveryEnabled(env = process.env) {
+  return (env.ANTHROPIC_API_KEY ?? "").trim().length > 0 && env.DISCOVERY_ENABLED !== "false";
+}
+async function kalshiJson(path3) {
+  const response = await fetch(`${KALSHI}${path3}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(KALSHI_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`Kalshi HTTP ${response.status}`);
+  return await response.json();
+}
+async function weatherCatalog() {
+  if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) return catalogCache;
+  const body = await kalshiJson(`/series?category=${encodeURIComponent(CATALOG_CATEGORY)}`);
+  const series = (body.series ?? []).filter((row) => row.ticker && row.title);
+  series.sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
+  const lines = series.map((row) => `${row.ticker} | ${row.title} | ${row.frequency ?? ""}`).join("\n");
+  catalogCache = { at: Date.now(), lines, tickers: new Set(series.map((row) => String(row.ticker))) };
+  return catalogCache;
+}
+var SYSTEM_PROMPT = [
+  "You are the risk analyst inside Switchboard, which hedges what can break a business using prediction markets.",
+  "Given a short business description, identify the two to four exposures that most move its monthly profit and loss.",
+  "Lead with the non-obvious ones: the risk the owner would not list themselves. For each, write `insight` as one or two plain sentences a small-business owner understands, saying why it matters and why it is easy to miss.",
+  "Prefer exposures that a market in the catalog below actually tracks: weather by city (daily highs and lows, monthly rain, snow), storms, hurricanes. For each exposure, list the series tickers from the catalog that track it, best match first, at most three, copied exactly. Leave the list empty when nothing in the catalog fits; do not stretch a weather market onto a non-weather risk.",
+  "`direction` says whether the bad outcome is the measured value going `below` or `above` a level (an ice cream shop is hurt by a cold day: below). `threshold` is that level in the market's units (degrees Fahrenheit, inches) when you can name one, else null.",
+  '`badOutcome` is one short phrase naming the bad case, with the city and measure, e.g. "NYC daily high below 70\xB0F".',
+  "Scenarios: three to five monthly scenarios, including one normal month with lossUsd 0 and exposureIndex -1. Every other scenario names the exposure it comes from by index. Probabilities are per month and sum to 1. Losses are realistic US dollars for the business's size; when the size is unstated, assume a small business and say nothing about it.",
+  "Use the city the user names. If none is named, use the city in the catalog that best matches the jurisdiction, or New York.",
+  "",
+  "Kalshi weather catalog (ticker | title | frequency):"
+].join("\n");
+var DISCOVERY_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    companyName: { type: "string" },
+    exposures: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          description: { type: "string" },
+          category: { type: "string", enum: [...CATEGORIES] },
+          insight: { type: "string" },
+          badOutcome: { type: "string" },
+          direction: { type: "string", enum: ["below", "above", "unclear"] },
+          threshold: { type: "number" },
+          hasThreshold: { type: "boolean" },
+          seriesTickers: { type: "array", items: { type: "string" } }
+        },
+        required: ["label", "description", "category", "insight", "badOutcome", "direction", "threshold", "hasThreshold", "seriesTickers"],
+        additionalProperties: false
+      }
+    },
+    scenarios: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          probability: { type: "number" },
+          lossUsd: { type: "number" },
+          exposureIndex: { type: "number" }
+        },
+        required: ["label", "probability", "lossUsd", "exposureIndex"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["companyName", "exposures", "scenarios"],
+  additionalProperties: false
+};
+async function askClaude(input, catalog, timeoutMs = DISCOVERY_TIMEOUT_MS) {
+  const client = new Anthropic({ timeout: timeoutMs, maxRetries: 0 });
+  const stream = client.messages.stream({
+    model: MODEL,
+    max_tokens: 16e3,
+    // Low effort keeps this inside a live demo and a Vercel function limit; the task is extraction, not search.
+    output_config: { effort: "low", format: { type: "json_schema", schema: DISCOVERY_JSON_SCHEMA } },
+    system: [
+      { type: "text", text: SYSTEM_PROMPT },
+      { type: "text", text: catalog, cache_control: { type: "ephemeral" } }
+    ],
+    messages: [{
+      role: "user",
+      content: `Business: ${input.description}
+Jurisdiction: ${input.jurisdiction}
+Monthly hedge budget: $${input.budget}
+Largest monthly loss they can absorb: $${input.tail}`
+    }]
+  });
+  const message = await stream.finalMessage();
+  if (message.stop_reason === "refusal" || message.stop_reason === "max_tokens") return null;
+  const text2 = message.content.map((block) => block.type === "text" ? block.text : "").join("");
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch {
+    return null;
+  }
+  if (raw && typeof raw === "object" && Array.isArray(raw.exposures)) {
+    for (const exposure of raw.exposures) {
+      if (exposure.hasThreshold === false) exposure.threshold = null;
+      delete exposure.hasThreshold;
+    }
+  }
+  const parsed = DiscoverySchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+function stableId(prefix, material) {
+  return `${prefix}_${createHash("sha256").update(material).digest("hex").slice(0, 12)}`;
+}
+function roundMoney(value) {
+  return String(Math.max(0, Math.round(value)));
+}
+function toAnalysis(input, found, tickers) {
+  const exposuresIn = found.exposures.slice(0, 4);
+  if (exposuresIn.length === 0) return null;
+  const companyId = stableId("co_ai", `${input.jurisdiction}|${input.description.toLowerCase()}`);
+  const exposureIds = exposuresIn.map((_, index) => `exp_ai_${index + 1}`);
+  const risky = found.scenarios.filter((row) => row.exposureIndex >= 0 && row.exposureIndex < exposuresIn.length && row.lossUsd > 0 && row.probability > 0).slice(0, 5);
+  if (risky.length === 0) return null;
+  let riskMass = risky.reduce((sum, row) => sum + row.probability, 0);
+  const scale = riskMass > 0.5 ? 0.5 / riskMass : 1;
+  const scenarios = risky.map((row, index) => ({
+    scenarioId: `s_ai_${index + 1}`,
+    label: row.label,
+    probability: Math.round(row.probability * scale * 1e4) / 1e4,
+    baselineLossUsd: roundMoney(row.lossUsd),
+    factorShocks: Object.fromEntries(exposureIds.map((id2, exposureIndex) => [id2, exposureIndex === row.exposureIndex ? 1 : 0])),
+    source: "synthetic"
+  }));
+  riskMass = scenarios.reduce((sum, row) => sum + row.probability, 0);
+  scenarios.unshift({
+    scenarioId: "s_ai_normal",
+    label: found.scenarios.find((row) => row.exposureIndex < 0)?.label || "Normal month",
+    probability: Math.round((1 - riskMass) * 1e4) / 1e4,
+    baselineLossUsd: "0",
+    factorShocks: Object.fromEntries(exposureIds.map((id2) => [id2, 0])),
+    source: "synthetic"
+  });
+  const exposures = exposuresIn.map((row, index) => ({
+    exposureId: exposureIds[index],
+    category: row.category,
+    label: row.label,
+    description: row.description,
+    riskFactors: [exposureIds[index]],
+    horizonDays: 30,
+    scenarioIds: scenarios.filter((scenario) => scenario.factorShocks[exposureIds[index]] === 1).map((scenario) => scenario.scenarioId),
+    confidence: 0.5
+  }));
+  return {
+    analysis: {
+      company: {
+        companyId,
+        name: found.companyName.trim() || "Your business",
+        description: input.description,
+        jurisdiction: input.jurisdiction,
+        baseCurrency: "USD",
+        monthlyHedgeBudgetUsd: input.budget,
+        maxTolerableTailLossUsd: input.tail,
+        cvarAlpha: 0.95,
+        exposures,
+        scenarios,
+        confirmedByUser: false
+      },
+      assumptions: [
+        `Provenance: exposures and scenarios proposed by ${MODEL} from your description; edit them before you confirm.`,
+        "Losses and chances are estimates for a business of this kind, not your books."
+      ],
+      warnings: ["confirmedByUser is false until you confirm the scenarios."]
+    },
+    insights: exposuresIn.map((row, index) => ({ exposureId: exposureIds[index], label: row.label, insight: row.insight, badOutcome: row.badOutcome })),
+    markets: []
+  };
+}
+function sideFor(market, direction) {
+  if (market.strike_type === "less") return direction === "below" ? "yes" : "no";
+  if (market.strike_type === "greater") return direction === "above" ? "yes" : "no";
+  return null;
+}
+function strikeOf(market) {
+  if (market.strike_type === "less" && typeof market.cap_strike === "number") return market.cap_strike;
+  if (market.strike_type === "greater" && typeof market.floor_strike === "number") return market.floor_strike;
+  return null;
+}
+async function pickMarkets(found, exposureIds, tickers) {
+  const picks = [];
+  await Promise.all(found.exposures.slice(0, 4).map(async (exposure, index) => {
+    if (exposure.direction === "unclear") return;
+    const direction = exposure.direction;
+    for (const series of exposure.seriesTickers.filter((ticker) => tickers.has(ticker)).slice(0, 3)) {
+      let markets = [];
+      try {
+        markets = (await kalshiJson(`/markets?series_ticker=${encodeURIComponent(series)}&status=open&limit=50`)).markets ?? [];
+      } catch {
+        continue;
+      }
+      const usable = markets.filter((market) => market.ticker && TICKER.test(market.ticker) && !market.mve_collection_ticker && sideFor(market, direction) && strikeOf(market) !== null).map((market) => ({ market, side: sideFor(market, direction), strike: strikeOf(market) })).filter(({ market, side }) => Number((side === "yes" ? market.yes_ask_dollars : market.no_ask_dollars) ?? "0") > 0 && Number((side === "yes" ? market.yes_ask_dollars : market.no_ask_dollars) ?? "1") < 1);
+      const target2 = exposure.threshold;
+      const near = target2 === null ? usable : usable.filter(({ strike }) => Math.abs(strike - target2) <= Math.max(3, Math.abs(target2) * 0.15));
+      usable.splice(0, usable.length, ...near);
+      if (usable.length === 0) continue;
+      usable.sort((a, b) => {
+        const expiry = Date.parse(a.market.expiration_time ?? "") - Date.parse(b.market.expiration_time ?? "");
+        if (expiry !== 0 && Number.isFinite(expiry)) return expiry;
+        if (target2 === null) return 0;
+        return Math.abs(a.strike - target2) - Math.abs(b.strike - target2);
+      });
+      const chosen = target2 === null ? usable.slice(0, 1) : usable.filter((row) => row.market.expiration_time === usable[0].market.expiration_time).sort((a, b) => Math.abs(a.strike - target2) - Math.abs(b.strike - target2)).slice(0, 1);
+      for (const { market, side } of chosen) {
+        const condition = market.yes_sub_title ?? market.title ?? market.ticker;
+        picks.push({ ticker: market.ticker, side, exposureId: exposureIds[index], payIf: side === "yes" ? condition : `not ${condition}` });
+      }
+      if (picks.filter((pick) => pick.exposureId === exposureIds[index]).length >= 2) break;
+    }
+  }));
+  return picks.slice(0, 6);
+}
+async function discoverRisks(input) {
+  try {
+    const catalog = await weatherCatalog();
+    const saved = PRECOMPUTED[discoveryKey(input.description)];
+    const found = saved ? saved.discovery : await askClaude(input, catalog.lines);
+    if (!found) return null;
+    const result = toAnalysis(input, found, catalog.tickers);
+    if (!result) return null;
+    if (saved) {
+      result.analysis.assumptions[0] = `Provenance: exposures and scenarios proposed by ${MODEL} on ${saved.generatedAt.slice(0, 10)} for this exact description and saved for the demo; edit them before you confirm. Kalshi prices are live.`;
+    }
+    result.markets = await pickMarkets(found, result.analysis.company.exposures.map((row) => row.exposureId), catalog.tickers);
+    return result;
+  } catch (error) {
+    if (process.env.DISCOVERY_DEBUG === "1") console.error("[discovery]", error);
+    return null;
+  }
+}
+async function liveQuotes(picks, requestedQuantity) {
+  if (!Array.isArray(picks)) return [];
+  const valid = picks.filter((row) => !!row && typeof row === "object" && typeof row.ticker === "string" && TICKER.test(row.ticker) && (row.side === "yes" || row.side === "no")).slice(0, 6);
+  const now = /* @__PURE__ */ new Date();
+  const quotes = await Promise.all(valid.map(async (pick) => {
+    try {
+      const { market } = await kalshiJson(`/markets/${encodeURIComponent(pick.ticker)}`);
+      if (!market?.ticker || !market.expiration_time) return null;
+      const ask = pick.side === "yes" ? market.yes_ask_dollars : market.no_ask_dollars;
+      const bid = pick.side === "yes" ? market.yes_bid_dollars : market.no_bid_dollars;
+      if (!ask || Number(ask) <= 0 || Number(ask) >= 1) return null;
+      const condition = market.yes_sub_title ?? market.title ?? market.ticker;
+      const payIf = pick.side === "yes" ? condition : `not ${condition}`;
+      const quantity = requestedQuantity;
+      const cost = (Number(ask) * Number(quantity)).toFixed(2);
+      return {
+        quoteId: `q_kalshi_${market.ticker}_${pick.side}_${now.getTime()}`,
+        instrument: {
+          instrumentId: `kalshi_${market.ticker}_${pick.side}`,
+          venue: "kalshi",
+          name: `${pick.side === "yes" ? "YES" : "NO"}: ${market.title ?? market.ticker}`,
+          riskFactor: pick.exposureId,
+          settlementType: "binary",
+          eventRule: `Pays $1 per contract if ${payIf}. ${market.rules_primary ?? ""}`.trim(),
+          resolutionSourceUrl: `${KALSHI}/markets/${market.ticker}`,
+          expiresAt: market.expiration_time,
+          payoutPerUnitUsd: "1",
+          maximumPayoutUsd: "1",
+          collateralCurrency: "USD",
+          unitDescription: "One Kalshi binary contract, from Kalshi's public read API. Not executable here."
+        },
+        venue: "kalshi",
+        capability: "read_only",
+        comparison: "proxy",
+        eligibilityReason: "Live Kalshi public price. Read only: Switchboard does not place orders on Kalshi, so this is not part of the sandbox hedge.",
+        bidUsd: bid && Number(bid) > 0 ? Number(bid).toFixed(2) : "0",
+        askUsd: Number(ask).toFixed(2),
+        requestedQuantity: quantity,
+        availableQuantity: pick.side === "yes" && market.yes_ask_size_fp ? String(Math.floor(Number(market.yes_ask_size_fp))) : quantity,
+        estimatedAllInBuyCostUsd: cost,
+        fees: { tradingFeeUsd: "0", networkFeeUsd: "0", conversionFeeUsd: "0", modeledSlippageUsd: "0", otherFeeUsd: "0" },
+        quotedAt: now.toISOString(),
+        expiresAt: new Date(Math.min(now.getTime() + 15 * 6e4, Date.parse(market.expiration_time))).toISOString(),
+        source: "live",
+        basisRiskDescription: `Pays if ${payIf}. Your loss depends on more than this one measurement, so it offsets part of the bad case, not all of it.`
+      };
+    } catch {
+      return null;
+    }
+  }));
+  return quotes.filter((quote) => quote !== null);
+}
+
 // demo/ledger.ts
 var MEMO_TYPE = "switchboard/plan-approval";
 var DEFAULT_PATH = "44'/144'/0'/0/0";
@@ -466,10 +887,34 @@ function renderPage(previews) {
 
     /* Scenarios */
     .scenarios { margin-top: 2.5rem; }
+    .thinking { margin-top: 2.5rem; border: 1px solid var(--line-2); border-radius: 16px; padding: 1.4rem 1.5rem; background: linear-gradient(180deg, rgba(250, 204, 21, 0.05), rgba(10, 10, 10, 0.6)); }
+    .thinking-head { display: flex; align-items: center; gap: 0.75rem; font-weight: 600; font-size: 15px; }
+    .orb { width: 14px; height: 14px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.6); animation: pulse 1.6s ease-out infinite; flex: none; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.55); } 80% { box-shadow: 0 0 0 14px rgba(250, 204, 21, 0); } 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); } }
+    .thinking-steps { list-style: none; margin: 1.1rem 0 0; padding: 0; display: grid; gap: 0.55rem; }
+    .thinking-steps li { display: flex; align-items: center; gap: 0.65rem; font-size: 13.5px; color: var(--faint); transition: color 300ms ease; }
+    .thinking-steps li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); flex: none; transition: background 300ms ease; }
+    .thinking-steps li.on { color: var(--text); }
+    .thinking-steps li.on::before { background: var(--yellow); box-shadow: 0 0 10px rgba(250, 204, 21, 0.6); }
+    .thinking-steps li.done { color: var(--muted); }
+    .thinking-steps li.done::before { background: var(--green); }
+    .thinking-bar { height: 2px; border-radius: 1px; margin-top: 1.2rem; background: linear-gradient(90deg, transparent, var(--yellow), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sweep 1.4s ease-in-out infinite; }
+    @keyframes sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+    .insights { margin-top: 2.5rem; }
+    .insights h2 { font-size: 15px; display: flex; align-items: center; gap: 0.5rem; }
+    .insights h2 i { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-dim); }
+    .insights > p { color: var(--muted); font-size: 13px; margin-top: 0.25rem; }
+    .insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+    .insight { border: 1px solid var(--line-2); border-radius: 14px; padding: 1rem 1.05rem; background: var(--raised); }
+    .insight h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .insight p { font-size: 13px; color: var(--muted); margin-top: 0.45rem; line-height: 1.55; }
+    .insight .bad { margin-top: 0.7rem; font-size: 12.5px; color: var(--text); }
+    .insight .bad b { color: var(--yellow); font-weight: 500; }
+    .insight .mk { margin-top: 0.4rem; font-size: 12px; color: var(--faint); }
     .scenarios-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.9rem; }
     .scenarios-head h2 { font-size: 15px; }
     .scenarios-head p { color: var(--muted); font-size: 13px; margin-top: 0.2rem; }
-    .scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
     .scenario { padding: 1rem 1rem 1rem 0; }
     .scenario + .scenario { padding-left: 1rem; border-left: 1px solid var(--line); }
     .scenario-label { font-size: 13px; color: var(--muted); min-height: 2.6em; line-height: 1.35; }
@@ -736,7 +1181,7 @@ function renderPage(previews) {
     <span>Try</span>
     <button type="button" data-example="0">AI support desk</button>
     <button type="button" data-example="1">Voice agent on a GPU cloud</button>
-    <button type="button" data-example="2">Coastal retailer</button>
+    <button type="button" data-example="2">Ice cream shop in New York</button>
   </div>
   <div class="intro-msg" id="intro-msg"></div>
   <div id="scenarios"></div>
@@ -780,7 +1225,7 @@ function renderPage(previews) {
   var EXAMPLES = [
     'Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.',
     'Voice agent startup running LLM inference on one GPU cloud provider, where an outage or token price spike hurts margins',
-    'Coastal retailer with storm-related delivery delays when a warehouse closes'
+    'Ice cream shop in New York'
   ];
   var MODES = [['min_cvar', 'Worst case'], ['balanced', 'Balanced'], ['min_cost', 'Lowest cost']];
   var VENUE = {
@@ -822,6 +1267,7 @@ function renderPage(previews) {
     notice: null,
     error: null,
     busy: false,
+    discovery: null,
     ledgerStatus: null,
     approveWith: 'ledger'
   };
@@ -961,6 +1407,7 @@ function renderPage(previews) {
     clear($('intro-msg'));
     if (!state.analysis) return;
     state.analysis = null;
+    state.discovery = null;
     state.confirmed = false;
     state.phase = 'draft';
     clear($('scenarios'));
@@ -1007,12 +1454,15 @@ function renderPage(previews) {
     clear(button);
     button.appendChild(el('span', { class: 'spinner', 'aria-hidden': 'true' }));
     button.appendChild(document.createTextNode('Analyzing'));
+    var loader = thinkingPanel();
+    $('scenarios').appendChild(loader.node);
     var result = await post('/demo/analyze', {
       description: description,
       jurisdiction: $('jurisdiction').value,
       monthlyHedgeBudgetUsd: budget,
       maxTolerableTailLossUsd: tail
     });
+    loader.stop();
     state.busy = false;
     button.disabled = false;
     if (!result.ok || !result.body.company) {
@@ -1021,12 +1471,60 @@ function renderPage(previews) {
       return;
     }
     state.analysis = result.body;
+    state.discovery = result.body.discovery || null;
     state.confirmed = false;
     state.quoted = null;
     state.result = null;
     state.phase = 'review';
     render();
   });
+
+    // Shown while the analyzer works. The steps describe what the server is actually doing.
+  function thinkingPanel() {
+    var steps = [
+      'Reading the business',
+      'Working out what moves its monthly P&L',
+      'Scanning 458 live Kalshi weather and climate markets',
+      'Matching contracts that pay out in the bad case',
+      'Sizing losses and chances for each scenario'
+    ];
+    var items = steps.map(function (text) { return el('li', { text: text }); });
+    var index = 0;
+    items[0].className = 'on';
+    var timer = setInterval(function () {
+      if (index >= items.length - 1) return;
+      items[index].className = 'done';
+      index += 1;
+      items[index].className = 'on';
+    }, 2600);
+    return {
+      node: el('div', { class: 'thinking', role: 'status', 'aria-live': 'polite' }, [
+        el('div', { class: 'thinking-head' }, [el('span', { class: 'orb', 'aria-hidden': 'true' }), 'Switchboard is analyzing your business']),
+        el('ol', { class: 'thinking-steps' }, items),
+        el('div', { class: 'thinking-bar', 'aria-hidden': 'true' })
+      ]),
+      stop: function () { clearInterval(timer); if (this.node && this.node.parentNode) this.node.parentNode.removeChild(this.node); }
+    };
+  }
+
+  function renderInsights() {
+    var found = state.discovery;
+    if (!found || !found.insights || !found.insights.length) return null;
+    var markets = found.markets || [];
+    return el('section', { class: 'insights' }, [
+      el('h2', {}, [el('i', { 'aria-hidden': 'true' }), 'What Switchboard noticed']),
+      el('p', { text: 'Risks in your P&L, including the ones that are easy to miss, and the live markets that pay out when they hit.' }),
+      el('div', { class: 'insight-grid' }, found.insights.map(function (item) {
+        var count = markets.filter(function (m) { return m.exposureId === item.exposureId; }).length;
+        return el('article', { class: 'insight' }, [
+          el('h3', { text: item.label }),
+          el('p', { text: item.insight }),
+          el('div', { class: 'bad' }, ['Bad case: ', el('b', { text: item.badOutcome })]),
+          el('div', { class: 'mk', text: count ? count + (count === 1 ? ' live Kalshi market matched' : ' live Kalshi markets matched') : 'No listed market tracks this yet' })
+        ]);
+      }))
+    ]);
+  }
 
   /* Scenarios */
 
@@ -1078,6 +1576,8 @@ function renderPage(previews) {
     });
 
     var notes = (analysis.assumptions || []).concat(analysis.warnings || []).filter(function (note) { return !/fictional|synthetic|sandbox|template/i.test(note); });
+    var insights = renderInsights();
+    if (insights) root.appendChild(insights);
     root.appendChild(el('div', { class: 'scenarios' }, [
       el('div', { class: 'scenarios-head' }, [
         el('div', {}, [
@@ -1129,7 +1629,7 @@ function renderPage(previews) {
     state.notice = null;
     render();
     toTop();
-    var result = await post('/demo/quote', { company: state.analysis.company, mode: state.mode });
+    var result = await post('/demo/quote', { company: state.analysis.company, mode: state.mode, liveMarkets: state.discovery ? state.discovery.markets : [] });
     state.busy = false;
     if (!result.ok || !result.body.plan) {
       state.phase = 'error';
@@ -1566,7 +2066,7 @@ function renderPage(previews) {
     go.appendChild(document.createTextNode(method === 'ledger' ? 'Waiting for the Ledger' : 'Approving'));
     var panel = method === 'ledger' ? devicePanel(plan.planHash) : null;
     if (panel) $('run-status').appendChild(panel.node);
-    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true, approval: method === 'ledger' ? 'ledger' : 'app' });
+    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true, liveMarkets: state.discovery ? state.discovery.markets : [], approval: method === 'ledger' ? 'ledger' : 'app' });
     if (panel) panel.stop();
     state.busy = false;
     if (result.status === 409 && result.body.requote && result.body.plan) {
@@ -1672,6 +2172,7 @@ function renderPage(previews) {
       return;
     }
     state.analysis = { company: body.company, assumptions: [], warnings: [] };
+    state.discovery = null;
     state.confirmed = true;
     if (body.plan) acceptQuote({ search: body.marketSearch, plan: body.plan, books: body.books });
     else { state.phase = 'error'; state.error = body.note || 'The sample run did not return a plan.'; }
@@ -1794,7 +2295,7 @@ function sumMoney(values) {
 }
 
 // services/execution/src/plan-hash.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { createRequire as createRequire2 } from "node:module";
 var require3 = createRequire2(import.meta.url);
 var canonicalize = require3("canonicalize");
@@ -1805,7 +2306,7 @@ function canonicalJson(value) {
   return json;
 }
 function sha256Prefixed(value) {
-  const hex = createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+  const hex = createHash2("sha256").update(canonicalJson(value), "utf8").digest("hex");
   return `sha256:${hex}`;
 }
 function planHashPayload(plan) {
@@ -4235,7 +4736,7 @@ function claimString(payload, key) {
 }
 
 // services/markets/src/idempotency.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 function headerValue(value) {
   if (Array.isArray(value)) return value[0];
   return value;
@@ -4243,7 +4744,7 @@ function headerValue(value) {
 async function withIdempotency2(request, reply, records, handler2) {
   const key = headerValue(request.headers["idempotency-key"])?.trim();
   if (!key) throw new ApiException(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required");
-  const bodyHash = createHash2("sha256").update(JSON.stringify(request.body ?? null)).digest("hex");
+  const bodyHash = createHash3("sha256").update(JSON.stringify(request.body ?? null)).digest("hex");
   const existing = records.get(key);
   if (existing) {
     if (existing.bodyHash !== bodyHash) {
@@ -5392,11 +5893,11 @@ function safeEqual(left, right) {
 }
 
 // services/strategy/src/app.ts
-import { createHash as createHash5, randomUUID as randomUUID8 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID8 } from "node:crypto";
 import Fastify3 from "fastify";
 
 // services/strategy/src/analyze.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 
 // services/strategy/src/errors.ts
 var StrategyError = class extends Error {
@@ -5513,8 +6014,8 @@ function classifyDescription(description) {
   if (climate === best && climate >= digital) return "climate";
   return "digital";
 }
-function stableId(prefix, material) {
-  const hex = createHash3("sha256").update(material).digest("hex").slice(0, 16);
+function stableId2(prefix, material) {
+  const hex = createHash4("sha256").update(material).digest("hex").slice(0, 16);
   return `${prefix}_${hex}`;
 }
 function titleFrom(description, fallback) {
@@ -5600,7 +6101,7 @@ function retailDemo(request) {
   };
 }
 function digitalTemplate(request) {
-  const companyId = stableId("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
+  const companyId = stableId2("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
   const scenarios = [
     { scenarioId: "normal", label: "Normal API operations", probability: 0.84, baselineLossUsd: "0", factorShocks: { primary_outage: 0, fallback_spread: 0 }, source: "synthetic" },
     { scenarioId: "price_spike", label: "Token or API price spike", probability: 0.1, baselineLossUsd: "1800", factorShocks: { primary_outage: 0, fallback_spread: 1 }, source: "synthetic" },
@@ -5630,7 +6131,7 @@ function digitalTemplate(request) {
   };
 }
 function climateTemplate(request) {
-  const companyId = stableId("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
+  const companyId = stableId2("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
   const scenarios = [
     { scenarioId: "weather_normal", label: "No material weather shock", probability: 0.8, baselineLossUsd: "0", factorShocks: { storm_severity: 0, footfall: 0 }, source: "synthetic" },
     { scenarioId: "weather_disruption", label: "Weather disruption", probability: 0.15, baselineLossUsd: "5000", factorShocks: { storm_severity: 1, footfall: 1 }, source: "synthetic" },
@@ -5659,7 +6160,7 @@ function climateTemplate(request) {
   };
 }
 function supplyTemplate(request) {
-  const companyId = stableId("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
+  const companyId = stableId2("co", `${request.jurisdiction}|${request.description.toLowerCase()}`);
   const scenarios = [
     { scenarioId: "ship_normal", label: "Schedule holds", probability: 0.8, baselineLossUsd: "0", factorShocks: { port_delay: 0, freight_rate: 0 }, source: "synthetic" },
     { scenarioId: "ship_delay", label: "Multi-day port delay", probability: 0.15, baselineLossUsd: "6000", factorShocks: { port_delay: 1, freight_rate: 1 }, source: "synthetic" },
@@ -5688,7 +6189,7 @@ function supplyTemplate(request) {
   };
 }
 function freeform(request, template) {
-  const companyId = stableId("co", `${template}|${request.jurisdiction}|${request.description.toLowerCase()}`);
+  const companyId = stableId2("co", `${template}|${request.jurisdiction}|${request.description.toLowerCase()}`);
   const thin = template === "thin";
   const scenarios = [
     { scenarioId: "base", label: thin ? "Placeholder base case" : "Base case", probability: 0.8, baselineLossUsd: "0", factorShocks: { demand_shock: 0, cost_shock: 0 }, source: "synthetic" },
@@ -5738,7 +6239,7 @@ function analyzeCompany(request) {
 }
 
 // services/strategy/src/hash.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { createRequire as createRequire3 } from "node:module";
 var require4 = createRequire3(import.meta.url);
 var canonicalize2 = require4("canonicalize");
@@ -5750,7 +6251,7 @@ function canonicalJson2(value) {
   return canonical;
 }
 function sha256Hex(value) {
-  return createHash4("sha256").update(value).digest("hex");
+  return createHash5("sha256").update(value).digest("hex");
 }
 function planHash(plan) {
   const body = {
@@ -6447,7 +6948,7 @@ function buildApp3(options = {}) {
     if (!key) {
       return apiError2(reply, 400, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key is required on POST.", request.correlationId);
     }
-    const bodyHash = createHash5("sha256").update(canonicalJson2(request.body ?? null)).digest("hex");
+    const bodyHash = createHash6("sha256").update(canonicalJson2(request.body ?? null)).digest("hex");
     const existing = store.idempotency.get(key);
     if (existing && existing.bodyHash !== bodyHash) {
       return apiError2(reply, 409, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with a different request body.", request.correlationId);
@@ -6732,12 +7233,26 @@ async function createDemoApp() {
       monthlyHedgeBudgetUsd,
       maxTolerableTailLossUsd
     });
+    const templateCompany = isRecord6(analyzed.body) && isRecord6(analyzed.body.company) ? analyzed.body.company : null;
+    const isBuiltInDemo = templateCompany?.companyId === "co_demo_ai" || templateCompany?.companyId === "co_retail_demo";
+    if (analyzed.status === 200 && !isBuiltInDemo && discoveryEnabled(process.env)) {
+      const discovered = await discoverRisks({
+        description: String(description),
+        jurisdiction: String(jurisdiction),
+        budget: String(monthlyHedgeBudgetUsd),
+        tail: String(maxTolerableTailLossUsd)
+      });
+      if (discovered) {
+        return { ...discovered.analysis, discovery: { insights: discovered.insights, markets: discovered.markets } };
+      }
+    }
     return reply.code(analyzed.status).send(analyzed.body);
   });
   gateway2.post("/demo/quote", async (request, reply) => {
     const input = readPlanInput(request.body);
     if (typeof input === "string") return reply.code(400).send({ message: input });
-    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, []);
+    const extra = await liveQuotes(isRecord6(request.body) ? request.body.liveMarkets : void 0, REQUESTED_QUANTITY);
+    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, [], extra);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message });
     return { search: quoted.search, plan: quoted.plan, books: quoted.books };
   });
@@ -6756,7 +7271,8 @@ async function createDemoApp() {
       return reply.code(400).send({ message: "Ledger approval is not configured on this deploy. Approve in the app instead." });
     }
     const steps = [];
-    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps);
+    const extra = await liveQuotes(request.body.liveMarkets, REQUESTED_QUANTITY);
+    const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps, extra);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message, steps });
     if (!sameTerms(reviewed, quoted.plan)) {
       return reply.code(409).send({
@@ -6839,7 +7355,7 @@ async function readBooks(markets) {
   }
   return books;
 }
-async function quoteAndPlan(strategy, markets, company, mode, steps) {
+async function quoteAndPlan(strategy, markets, company, mode, steps, extraQuotes = []) {
   const exposureIds = Array.isArray(company.exposures) ? company.exposures.map((exposure) => isRecord6(exposure) && typeof exposure.exposureId === "string" ? exposure.exposureId : "").filter(Boolean) : [];
   const search = await call(markets, "POST", "/v1/markets/search", {
     companyId: company.companyId,
@@ -6851,6 +7367,9 @@ async function quoteAndPlan(strategy, markets, company, mode, steps) {
   steps.push({ name: "search", status: search.status, detail: detailOf(search.body, "search") });
   if (search.status !== 200) {
     return { ok: false, stage: "search", status: search.status, message: messageOf(search.body, "Market search failed. No plan was created.") };
+  }
+  if (extraQuotes.length > 0 && isRecord6(search.body) && Array.isArray(search.body.quotes)) {
+    search.body.quotes = [...extraQuotes, ...search.body.quotes];
   }
   const generated = await call(strategy, "POST", "/v1/strategies/generate", {
     company,
