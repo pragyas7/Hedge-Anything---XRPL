@@ -305,12 +305,17 @@ export async function createDemoApp() {
     const templateCompany = isRecord(analyzed.body) && isRecord(analyzed.body.company) ? analyzed.body.company : null;
     const isBuiltInDemo = templateCompany?.companyId === "co_demo_ai" || templateCompany?.companyId === "co_retail_demo";
     if (analyzed.status === 200 && !isBuiltInDemo && discoveryEnabled(process.env)) {
-      const discovered = await discoverRisks({
-        description: String(description),
-        jurisdiction: String(jurisdiction),
-        budget: String(monthlyHedgeBudgetUsd),
-        tail: String(maxTolerableTailLossUsd),
-      });
+      // Whatever stalls (model, network), the page gets an answer: past the deadline it keeps the template analysis.
+      const deadlineMs = Number(process.env.DISCOVERY_DEADLINE_MS ?? 30_000);
+      const discovered = await Promise.race([
+        discoverRisks({
+          description: String(description),
+          jurisdiction: String(jurisdiction),
+          budget: String(monthlyHedgeBudgetUsd),
+          tail: String(maxTolerableTailLossUsd),
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), deadlineMs)),
+      ]);
       if (discovered) {
         return { ...discovered.analysis, discovery: { insights: discovered.insights, markets: discovered.markets } };
       }
