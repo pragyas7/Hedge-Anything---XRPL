@@ -139,6 +139,8 @@ export class LedgerApprover {
 
   private async connect(): Promise<{ signer: Signer; address: string; publicKey: string }> {
     if (this.signer && this.account) return { signer: this.signer, ...this.account };
+    // A review left on screen by an earlier, abandoned request makes every new exchange fail.
+    await this.clearPendingReview().catch(() => undefined);
     const dmkMod = await import("@ledgerhq/device-management-kit");
     const { SignerXrpBuilder } = await import("@ledgerhq/device-signer-kit-xrp");
     const { speculosTransportFactory, speculosIdentifier } = await import("@ledgerhq/device-transport-kit-speculos");
@@ -199,8 +201,18 @@ export class LedgerApprover {
       const unsigned = xrpl.encode(tx);
       const bytes = dmkMod.hexaStringToBuffer(unsigned);
       if (!bytes) throw new Error("Could not serialize the approval transaction.");
+      await this.clearPendingReview();
       debug("signing on device");
-      const signature = await finish<Uint8Array>(signer.signTransaction(this.config.path, bytes), SIGN_TIMEOUT_MS);
+      let signature: Uint8Array;
+      try {
+        signature = await finish<Uint8Array>(signer.signTransaction(this.config.path, bytes), SIGN_TIMEOUT_MS);
+      } catch (error) {
+        // A timed-out or failed request leaves the review on screen and the session unusable.
+        await this.clearPendingReview().catch(() => undefined);
+        this.signer = null;
+        this.account = null;
+        throw error;
+      }
       const signed = xrpl.encode({ ...tx, TxnSignature: dmkMod.bufferToHexaString(signature, false).toUpperCase() });
       debug("signed");
       const verified = await verifyApprovalTx(signed, { planHash, address, publicKey });
@@ -246,6 +258,45 @@ export class LedgerApprover {
       }
     }
     throw new Error("The testnet faucet did not fund the Ledger account in time.");
+  }
+
+  /** Text on the emulator screen right now, with positions. Speculos only; a physical device has no such API. */
+  private async screenTexts(): Promise<Array<{ text: string; x: number; y: number; w: number; h: number }>> {
+    const response = await this.fetchImpl(`${this.config.url}/events?currentscreenonly=true`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return [];
+    const body = await response.json() as { events?: Array<{ text?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }> };
+    return (body.events ?? [])
+      .filter((event) => typeof event.text === "string")
+      .map((event) => ({ text: String(event.text), x: Number(event.x), y: Number(event.y), w: Number(event.w), h: Number(event.h) }));
+  }
+
+  private async tapText(label: string): Promise<boolean> {
+    const target = (await this.screenTexts()).find((event) => event.text === label);
+    if (!target) return false;
+    const x = Math.round(target.x + target.w / 2);
+    const y = Math.round(target.y + target.h / 2);
+    await this.finger("press", x, y);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await this.finger("release", x, y);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return true;
+  }
+
+  /**
+   * An abandoned request leaves the XRP app on its review screen, which blocks the next one.
+   * On touch models, reject it the way a person would. Only acts when a review is on screen.
+   */
+  private async clearPendingReview(): Promise<void> {
+    if (this.config.model !== "STAX" && this.config.model !== "FLEX") return;
+    const texts = (await this.screenTexts()).map((event) => event.text);
+    if (texts.includes("Yes, reject")) {
+      debug("clearing an abandoned reject prompt");
+      await this.tapText("Yes, reject");
+      return;
+    }
+    if (!texts.includes("Reject")) return;
+    debug("clearing an abandoned review");
+    if (await this.tapText("Reject")) await this.tapText("Yes, reject");
   }
 
   async screenshot(): Promise<Response> {
