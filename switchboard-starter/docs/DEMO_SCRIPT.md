@@ -28,7 +28,7 @@ The markets table lists contracts that pay out when the risk happens.
 
 - The top row, **API unavailable ≥15 minutes (3 of 5 regions)**, has a yellow rail and "10 in your hedge". Its chance is the ask divided by the payout, about 1.8%.
 - Click the row to open its **order book** and the exact rule it resolves on.
-- Click **All** to show reference markets: a synthetic Kalshi listing and Polymarket International, which is reference only in the US. "We show what we can't buy, and why."
+- Click **All**. If Kalshi answered, one row says **Live public price**: a real NYC temperature contract, read-only, and not in the hedge. "We show a live price, and we show why it does not hedge an API." If Kalshi did not answer, that row is the labeled synthetic weather example instead. Polymarket International stays reference only in the US.
 
 Scroll to **What your hedge pays**:
 
@@ -48,7 +48,7 @@ If asked about Ledger (no device): "Approval is in-app today, and the page says 
 
 ## 2:20 to 2:50. Execution and the agent payment
 
-The slip becomes a receipt: approval, sandbox orders, failover armed, outage drill run, and the XRPL EVM testnet block it read.
+The slip becomes a receipt with three beats: the sandbox fill, the primary API going down, and the XRPL EVM testnet block it read. The run trace is behind **Run trace**.
 
 Choose the version that matches the day.
 
@@ -73,8 +73,8 @@ Open **Integrations on this deploy** at the bottom to show the honest status of 
 
 ## Honest provenance
 
-- Company details and scenario numbers are illustrative templates until a real user supplies them.
-- Switchboard exchange prices and order books are sandbox. Kalshi and Polymarket rows are synthetic examples, not live listings.
+- Company details and scenario numbers are illustrative templates until a real user supplies them. The default company on screen is Northline Support.
+- Switchboard exchange prices and order books are sandbox. A Kalshi row marked Live public price is a real public quote and is not buyable. If that row is missing, the weather example is synthetic. Polymarket International stays a synthetic reference.
 - Orders are `SIMULATED`. Nothing reaches a live US derivatives venue.
 - Approval is in-app (`app_manual`), not a Ledger signature. Ledger Agent Intent is unsupported on XRPL EVM chain 1449000, and the page says no device is connected.
 - An RLUSD payout is claimed only with a real payout transaction from the AP4M settle call.

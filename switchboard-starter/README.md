@@ -31,7 +31,7 @@ Describe a company → confirm exposures and risk budget → aggregate comparabl
 
 ## Judge demo
 
-Public one-shot proof: [https://switchboard-hackathon.vercel.app](https://switchboard-hackathon.vercel.app). The button runs analysis, a sandbox quote, `app_manual` approval, simulated orders, and a mock failover in one process. Orders stay `SIMULATED`. Failover stops at `VOUCHER_SIGNED` until AP4M credentials exist. The chain card is the public XRPL EVM testnet RPC unless `QUICKNODE_RPC_URL` is set. `ledger_agent_intent` stays unsupported on chain id 1449000.
+Public one-shot proof: [https://switchboard-hackathon.vercel.app](https://switchboard-hackathon.vercel.app). The button runs analysis, a sandbox quote, `app_manual` approval, simulated orders, and a mock failover in one process. Orders stay `SIMULATED`. Failover stops at `VOUCHER_SIGNED` until AP4M credentials exist. The page reads Kalshi's public market API unless `KALSHI_ENABLED=false`. A `source: live` row is that public price, read-only, and it is not ordered. If Kalshi does not answer, the labeled synthetic weather example stays. The chain line is the public XRPL EVM testnet RPC unless `QUICKNODE_RPC_URL` is set. `ledger_agent_intent` stays unsupported on chain id 1449000.
 
 Local one-process page: `pnpm demo`, then [http://127.0.0.1:4110](http://127.0.0.1:4110). The gateway lives in `demo/app.ts` and the page in `demo/page.ts`; `server.ts` only starts it. Before another Vercel deploy, run `pnpm bundle:demo` so `api/index.mjs` matches the source. The judge walkthrough is [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
 

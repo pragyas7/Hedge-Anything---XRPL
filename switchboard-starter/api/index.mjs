@@ -119,6 +119,187 @@ import { request as httpRequest } from "node:http";
 import { Decimal as Decimal5 } from "decimal.js";
 import Fastify4 from "fastify";
 
+// demo/ledger.ts
+var MEMO_TYPE = "switchboard/plan-approval";
+var DEFAULT_PATH = "44'/144'/0'/0/0";
+var DEFAULT_WSS = "wss://s.altnet.rippletest.net:51233";
+var FAUCET = "https://faucet.altnet.rippletest.net/accounts";
+var SIGN_TIMEOUT_MS = 18e4;
+function ledgerConfig(env = process.env) {
+  const url = (env.LEDGER_SPECULOS_URL ?? "").trim().replace(/\/+$/, "");
+  if (!url) return null;
+  return {
+    url,
+    model: (env.LEDGER_SPECULOS_MODEL ?? "STAX").trim().toUpperCase(),
+    path: (env.LEDGER_DERIVATION_PATH ?? DEFAULT_PATH).trim(),
+    wss: (env.XRPL_TESTNET_WSS ?? DEFAULT_WSS).trim()
+  };
+}
+var hexOf = (text2) => Buffer.from(text2, "utf8").toString("hex").toUpperCase();
+var textOf = (hex) => typeof hex === "string" ? Buffer.from(hex, "hex").toString("utf8") : "";
+async function verifyApprovalTx(signedBlob, expected) {
+  const xrpl = await import("xrpl");
+  let tx;
+  try {
+    tx = xrpl.decode(signedBlob);
+  } catch {
+    return { ok: false, reason: "The signed transaction could not be decoded." };
+  }
+  if (tx.TransactionType !== "AccountSet") return { ok: false, reason: "The device signed something other than the approval transaction." };
+  if (tx.Account !== expected.address) return { ok: false, reason: "The signing account is not the Ledger account." };
+  const signingKey = String(tx.SigningPubKey ?? "").toUpperCase();
+  if (signingKey !== expected.publicKey.toUpperCase()) return { ok: false, reason: "The signing key is not the Ledger key." };
+  if (xrpl.deriveAddress(signingKey) !== expected.address) return { ok: false, reason: "The signing key does not belong to the Ledger account." };
+  const memos = Array.isArray(tx.Memos) ? tx.Memos : [];
+  const memo = memos.find((entry) => textOf(entry.Memo?.MemoType) === MEMO_TYPE)?.Memo;
+  if (!memo || textOf(memo.MemoData) !== expected.planHash) return { ok: false, reason: "The signed memo is not this plan's hash." };
+  let signatureOk = false;
+  try {
+    signatureOk = xrpl.verifySignature(signedBlob, signingKey);
+  } catch {
+    signatureOk = false;
+  }
+  if (!signatureOk) return { ok: false, reason: "The signature does not verify." };
+  return { ok: true, reason: "Signature, account, key, and plan hash all match." };
+}
+async function finish(action, timeoutMs) {
+  const { firstValueFrom, filter, timeout } = await import("rxjs");
+  try {
+    const result = await firstValueFrom(action.observable.pipe(
+      filter((state) => state.status === "completed" || state.status === "error"),
+      timeout(timeoutMs)
+    ));
+    if (result.status === "error") {
+      const message = result.error && typeof result.error === "object" && "message" in result.error ? String(result.error.message) : "The device reported an error.";
+      throw new Error(/rejected by user/i.test(message) ? "The approval was rejected on the Ledger." : message);
+    }
+    return result.output;
+  } catch (error) {
+    action.cancel();
+    if (error instanceof Error && error.name === "TimeoutError") throw new Error("Nobody approved on the device in time. Nothing was signed.");
+    throw error;
+  }
+}
+var LedgerApprover = class {
+  constructor(config, fetchImpl = fetch) {
+    this.config = config;
+    this.fetchImpl = fetchImpl;
+  }
+  signer = null;
+  account = null;
+  busy = false;
+  async connect() {
+    if (this.signer && this.account) return { signer: this.signer, ...this.account };
+    const dmkMod = await import("@ledgerhq/device-management-kit");
+    const { SignerXrpBuilder } = await import("@ledgerhq/device-signer-kit-xrp");
+    const { speculosTransportFactory, speculosIdentifier } = await import("@ledgerhq/device-transport-kit-speculos");
+    const { firstValueFrom, timeout } = await import("rxjs");
+    const model = dmkMod.DeviceModelId[this.config.model] ?? dmkMod.DeviceModelId.STAX;
+    const dmk = new dmkMod.DeviceManagementKitBuilder().addTransport(speculosTransportFactory(this.config.url, false, model)).build();
+    const device = await firstValueFrom(dmk.startDiscovering({ transport: speculosIdentifier }).pipe(timeout(1e4)));
+    const sessionId = await dmk.connect({ device });
+    const signer = new SignerXrpBuilder({ dmk, sessionId }).build();
+    const output = await finish(signer.getAddress(this.config.path, { checkOnDevice: false }), 3e4);
+    this.signer = signer;
+    this.account = { address: output.address, publicKey: output.publicKey.toUpperCase() };
+    return { signer, ...this.account };
+  }
+  async status() {
+    const base = { enabled: true, emulator: true, model: this.config.model };
+    try {
+      const response = await this.fetchImpl(this.config.url, { signal: AbortSignal.timeout(2e3) });
+      if (response.status >= 500) throw new Error(`HTTP ${response.status}`);
+    } catch {
+      return { ...base, reachable: false, address: null, note: `Speculos did not answer at ${this.config.url}. Start it, or approve in the app.` };
+    }
+    try {
+      const { address } = await this.connect();
+      return { ...base, reachable: true, address, note: `Ledger ${this.config.model} emulator (Speculos) running the XRP app. Approvals are signed on it and verified here.` };
+    } catch (error) {
+      this.signer = null;
+      this.account = null;
+      return { ...base, reachable: false, address: null, note: `Speculos answered but the XRP app did not: ${error instanceof Error ? error.message : "unknown error"}.` };
+    }
+  }
+  /** Signs the plan hash on the device, verifies it, and submits it to XRPL testnet. */
+  async approve(planHash2) {
+    if (this.busy) throw new Error("The device is already waiting on another approval.");
+    this.busy = true;
+    const xrpl = await import("xrpl");
+    const dmkMod = await import("@ledgerhq/device-management-kit");
+    const client = new xrpl.Client(this.config.wss);
+    try {
+      const { signer, address, publicKey } = await this.connect();
+      await client.connect();
+      await this.ensureFunded(client, address);
+      const tx = await client.autofill({
+        TransactionType: "AccountSet",
+        Account: address,
+        SigningPubKey: publicKey,
+        Memos: [{ Memo: { MemoType: hexOf(MEMO_TYPE), MemoData: hexOf(planHash2) } }],
+        // autofill allows about a minute. A person reading the device screen needs longer.
+        LastLedgerSequence: await client.getLedgerIndex() + 150
+      });
+      const unsigned = xrpl.encode(tx);
+      const bytes = dmkMod.hexaStringToBuffer(unsigned);
+      if (!bytes) throw new Error("Could not serialize the approval transaction.");
+      const signature = await finish(signer.signTransaction(this.config.path, bytes), SIGN_TIMEOUT_MS);
+      const signed = xrpl.encode({ ...tx, TxnSignature: dmkMod.bufferToHexaString(signature, false).toUpperCase() });
+      const verified = await verifyApprovalTx(signed, { planHash: planHash2, address, publicKey });
+      if (!verified.ok) throw new Error(`${verified.reason} The plan was not approved.`);
+      const submitted = await client.submitAndWait(signed);
+      const meta = submitted.result.meta;
+      const result = typeof meta === "object" && meta && "TransactionResult" in meta ? String(meta.TransactionResult) : "unknown";
+      if (result !== "tesSUCCESS") throw new Error(`XRPL testnet returned ${result}. The plan was not approved.`);
+      return {
+        txHash: submitted.result.hash,
+        result,
+        address,
+        publicKey,
+        explorerUrl: `https://testnet.xrpl.org/transactions/${submitted.result.hash}`
+      };
+    } finally {
+      this.busy = false;
+      if (client.isConnected()) await client.disconnect();
+    }
+  }
+  async ensureFunded(client, address) {
+    try {
+      await client.getXrpBalance(address);
+      return;
+    } catch (error) {
+      const code = error.data?.error;
+      if (code !== "actNotFound") throw error;
+    }
+    const response = await this.fetchImpl(FAUCET, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ destination: address })
+    });
+    if (!response.ok) throw new Error(`The testnet faucet returned HTTP ${response.status}.`);
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2e3));
+      try {
+        await client.getXrpBalance(address);
+        return;
+      } catch {
+      }
+    }
+    throw new Error("The testnet faucet did not fund the Ledger account in time.");
+  }
+  async screenshot() {
+    return this.fetchImpl(`${this.config.url}/screenshot`, { signal: AbortSignal.timeout(3e3) });
+  }
+  async finger(action, x, y) {
+    await this.fetchImpl(`${this.config.url}/finger`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, x, y }),
+      signal: AbortSignal.timeout(3e3)
+    });
+  }
+};
+
 // demo/page.ts
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
@@ -371,11 +552,28 @@ function renderPage(previews) {
     .arrow { color: var(--faint); margin: 0 0.35rem; }
     .consent { display: flex; gap: 0.6rem; align-items: flex-start; font-size: 12.5px; color: var(--muted); cursor: pointer; line-height: 1.5; }
     .consent input { margin: 0.15rem 0 0; width: 15px; height: 15px; accent-color: var(--yellow); flex: none; }
+    .method { display: flex; margin-bottom: 0.9rem; }
+    .method button { flex: 1; }
+    .device { margin-top: 1rem; display: grid; justify-items: center; gap: 0.6rem; }
+    .device-screen { width: 220px; aspect-ratio: 400 / 672; border-radius: 22px; border: 6px solid #1c1c1c; box-shadow: 0 0 0 1px var(--line-2), 0 18px 40px rgba(0, 0, 0, 0.5); background: #fff; cursor: pointer; touch-action: none; user-select: none; -webkit-user-drag: none; }
+    .device-hint { font-size: 12.5px; color: var(--text); text-align: center; line-height: 1.5; }
+    .device-foot { font-size: 11.5px; color: var(--faint); text-align: center; }
+    .line-item a { color: var(--yellow); text-decoration: none; font-family: var(--mono); font-size: 12.5px; }
+    .line-item a:hover { text-decoration: underline; }
     .slip-cta { margin-top: 0.9rem; }
     .slip-foot { font-size: 11.5px; color: var(--faint); margin-top: 0.6rem; text-align: center; }
     .skeleton { display: grid; gap: 0.6rem; }
     .skeleton i { display: block; height: 10px; border-radius: 5px; background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)); background-size: 200% 100%; animation: shimmer 1.4s ease infinite; }
     @keyframes shimmer { to { background-position: -200% 0; } }
+    .story { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.9rem; }
+    .story li { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr); gap: 0.55rem; align-items: start; }
+    .story .n { font-family: var(--mono); font-size: 12px; color: var(--yellow); line-height: 1.4; }
+    .story b { display: block; font-size: 13.5px; font-weight: 600; }
+    .story span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 0.15rem; line-height: 1.5; }
+    .trace { margin-top: 0.85rem; }
+    .trace summary { cursor: pointer; color: var(--faint); font-size: 12.5px; width: max-content; }
+    .trace summary:hover { color: var(--text); }
+    .trace .steps { margin-top: 0.65rem; }
     .receipt-head { display: flex; gap: 0.7rem; align-items: center; }
     .tick { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 700; flex: none; }
     .tick.ok { background: var(--yellow-dim); color: var(--yellow); }
@@ -446,7 +644,7 @@ function renderPage(previews) {
 <header class="topbar">
   <div class="brand"><span class="mark" aria-hidden="true"></span>Switchboard</div>
   <div class="top-right">
-    <span class="sandbox"><i aria-hidden="true"></i><span>Sandbox, synthetic prices</span></span>
+    <span class="sandbox"><i aria-hidden="true"></i><span id="mode-lamp-text">Sandbox hedge</span></span>
     <button class="btn btn-ghost" type="button" id="sample">Run sample</button>
   </div>
 </header>
@@ -454,12 +652,12 @@ function renderPage(previews) {
 <section class="intro" id="intro">
   <div class="backdrop" id="backdrop" aria-hidden="true"></div>
   <div class="hero" id="hero">
-    <span class="pill"><i aria-hidden="true"></i><b>Sandbox</b> on XRPL EVM testnet</span>
+    <span class="pill"><i aria-hidden="true"></i><b>Sandbox hedge</b> <span id="chain-meta">on XRPL EVM testnet</span></span>
     <h1>Hedge what can break your business.</h1>
-    <p>Describe what you depend on. Switchboard finds contracts that pay out when it fails and builds a hedge inside your budget.</p>
+    <p>Describe the dependency that takes the product down with it. Switchboard prices a hedge inside your budget, and an agent pays for backup when that dependency fails.</p>
   </div>
   <form class="composer" id="intake" novalidate>
-    <textarea id="desc" rows="2" placeholder="What does your business depend on, and what happens when it fails?" aria-label="What does your business depend on, and what happens when it fails?">Fictional AI customer-support service that depends on primary model API</textarea>
+    <textarea id="desc" rows="2" placeholder="What does your business depend on, and what happens when it fails?" aria-label="What does your business depend on, and what happens when it fails?">Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.</textarea>
     <div class="toolbar">
       <label class="chip" title="Where you operate">
         <select id="jurisdiction" aria-label="Where you operate">
@@ -516,10 +714,10 @@ function renderPage(previews) {
     <summary>What this sandbox can and cannot claim</summary>
     <div class="inner">
       <ul class="claims">
-        <li><strong>Markets.</strong> Every price here is synthetic or a sandbox order book. None is a live venue quote, and nothing reaches a live US derivatives venue.</li>
+        <li><strong>Markets.</strong> The hedge fills on the Switchboard sandbox book. A Kalshi row marked Live public price is a real public quote and is not buyable here. Synthetic rows are examples. Nothing is sent to a live US derivatives venue.</li>
         <li><strong>Mastercard AP4M.</strong> The team name on this process is Penn. Live payment code is present and stays idle until an agent key, <code>AP4M_MODE=live</code>, a 402 resource, and a channel id or cap are set. The failover drill stops at a mock voucher.</li>
         <li><strong>QuickNode.</strong> The chain read and the PaymentLedger log read use QuickNode only when <code>QUICKNODE_RPC_URL</code> is set. Otherwise both use the public XRPL EVM testnet RPC.</li>
-        <li><strong>Ledger.</strong> <code>ledger_agent_intent</code> is unsupported on chain id 1449000. Chain id 1440000 is not used. No device session is open and nothing is signed.</li>
+        <li id="claim-ledger"><strong>Ledger.</strong> <code>ledger_agent_intent</code> is unsupported on chain id 1449000. Chain id 1440000 is not used. No device session is open and nothing is signed.</li>
       </ul>
     </div>
   </details>
@@ -528,9 +726,9 @@ function renderPage(previews) {
 <script>
 (function () {
   var EXAMPLES = [
-    'Fictional AI customer-support service that depends on primary model API',
+    'Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.',
     'Voice agent startup running LLM inference on one GPU cloud provider, where an outage or token price spike hurts margins',
-    'Fictional retail operator with coastal stores and storm-related delivery delays'
+    'Coastal retailer with storm-related delivery delays when a warehouse closes'
   ];
   var MODES = [['min_cvar', 'Worst case'], ['balanced', 'Balanced'], ['min_cost', 'Lowest cost']];
   var VENUE = {
@@ -554,7 +752,8 @@ function renderPage(previews) {
     confirm: 'Approved in app',
     run: 'Placed sandbox orders',
     arm: 'Armed failover',
-    failover: 'Ran outage drill'
+    failover: 'Ran outage drill',
+    ledger: 'Signed on Ledger'
   };
   var MONEY = /^[0-9]+([.][0-9]+)?$/;
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -570,7 +769,9 @@ function renderPage(previews) {
     result: null,
     notice: null,
     error: null,
-    busy: false
+    busy: false,
+    ledgerStatus: null,
+    approveWith: 'ledger'
   };
 
   function $(id) { return document.getElementById(id); }
@@ -640,9 +841,11 @@ function renderPage(previews) {
   }
 
   function shortHash(hash) {
-    var text = String(hash || '');
-    return text.length > 16 ? text.slice(0, 8) + '\u2026' + text.slice(-6) : text;
+    var text = String(hash || '').replace(/^sha256:/, '');
+    return text.length > 16 ? text.slice(0, 6) + '\u2026' + text.slice(-6) : text;
   }
+
+  function hashEnding(hash) { return String(hash || '').slice(-8); }
 
   function message(tone, text) { return el('p', { class: 'msg ' + tone, role: tone === 'bad' ? 'alert' : 'status', text: text }); }
   function working(text) { return el('span', { class: 'working' }, [el('span', { class: 'spinner', 'aria-hidden': 'true' }), text]); }
@@ -882,6 +1085,11 @@ function renderPage(previews) {
     state.phase = 'priced';
     var held = marketItems().filter(function (item) { return item.held; })[0];
     state.selected = held ? held.id : null;
+    var lamp = $('mode-lamp-text');
+    if (lamp) {
+      var live = ((body.search && body.search.quotes) || []).some(function (quote) { return quote.source === 'live'; });
+      lamp.textContent = live ? 'Sandbox hedge, live Kalshi price' : 'Sandbox hedge';
+    }
     render();
   }
 
@@ -993,6 +1201,7 @@ function renderPage(previews) {
     var items = marketItems();
     var buyable = items.filter(function (item) { return item.status.buyable; });
     var shown = state.filter === 'all' ? items : buyable;
+    var liveCount = items.filter(function (item) { return item.source === 'live'; }).length;
     root.appendChild(el('div', { class: 'markets-head' }, [
       el('h2', { text: 'Markets' }),
       el('div', { class: 'tabs', role: 'group', 'aria-label': 'Filter markets' }, [
@@ -1000,6 +1209,9 @@ function renderPage(previews) {
         el('button', { class: 'tab', type: 'button', 'aria-pressed': String(state.filter === 'all'), onclick: function () { state.filter = 'all'; renderMarkets(); } }, ['All ' + items.length])
       ])
     ]));
+    if (liveCount && state.filter !== 'all') {
+      root.appendChild(el('p', { class: 'muted', style: 'font-size:12.5px;margin:-0.35rem 0 0.75rem', text: liveCount + (liveCount === 1 ? ' live Kalshi price is under All. It is a public quote, and it is not in this hedge.' : ' live Kalshi prices are under All. They are public quotes, and they are not in this hedge.') }));
+    }
     root.appendChild(el('div', { class: 'thead', 'aria-hidden': 'true' }, [
       el('span', { text: 'Market' }),
       el('span', { text: 'Chance' }),
@@ -1027,6 +1239,7 @@ function renderPage(previews) {
     var meta = [el('span', { text: VENUE[item.venue] || item.venue })];
     if (item.held) meta.push(el('span', { class: 'held', text: item.held + ' in your hedge' }));
     if (item.status.label) meta.push(el('span', { class: 'flag', text: item.status.label }));
+    if (item.source === 'live') meta.push(el('span', { class: 'flag', text: 'Live public price' }));
     if (item.source === 'synthetic') meta.push(el('span', { text: 'Synthetic quote' }));
     var cells = quote
       ? [
@@ -1202,29 +1415,99 @@ function renderPage(previews) {
       ]);
     }).concat([el('p', { class: 'meter-label', style: 'margin-top:0.6rem', text: 'Monthly loss without and with the hedge, premium included.' })])));
 
-    var check = el('input', { type: 'checkbox', id: 'consent' });
-    var go = el('button', { class: 'btn btn-primary btn-lg', type: 'button', id: 'run' }, ['Approve hedge']);
-    go.disabled = true;
-    check.addEventListener('change', function () { go.disabled = !check.checked || state.busy; });
-    go.addEventListener('click', function () { execute(plan); });
+    var ledgerOn = ledgerReady();
+    var useLedger = ledgerOn && state.approveWith !== 'app';
+    var toggle = ledgerOn ? el('div', { class: 'segmented method', role: 'group', 'aria-label': 'Approve with' }, [
+      el('button', { type: 'button', 'aria-pressed': String(useLedger), onclick: function () { state.approveWith = 'ledger'; renderSlip(); } }, ['Ledger']),
+      el('button', { type: 'button', 'aria-pressed': String(!useLedger), onclick: function () { state.approveWith = 'app'; renderSlip(); } }, ['In app'])
+    ]) : null;
+    var consentBlock;
+    var go;
+    if (useLedger) {
+      go = el('button', { class: 'btn btn-primary btn-lg', type: 'button', id: 'run' }, ['Approve on Ledger']);
+      go.addEventListener('click', function () { execute(plan, 'ledger'); });
+      consentBlock = el('p', { class: 'note-line', style: 'font-size:12.5px', text: 'The Ledger shows this plan\u2019s hash, ending in ' + hashEnding(plan.planHash) + '. Check it, then hold to sign. That approves the hedge and a $25 failover budget for a sandbox run.' });
+    } else {
+      var check = el('input', { type: 'checkbox', id: 'consent' });
+      go = el('button', { class: 'btn btn-primary btn-lg', type: 'button', id: 'run' }, ['Approve hedge']);
+      go.disabled = true;
+      check.addEventListener('change', function () { go.disabled = !check.checked || state.busy; });
+      go.addEventListener('click', function () { execute(plan, 'app'); });
+      consentBlock = el('label', { class: 'consent', for: 'consent' }, [check, el('span', { text: 'Approve this hedge and a $25 failover budget for a sandbox run. In-app approval, not a Ledger signature.' })]);
+    }
     root.appendChild(el('div', { class: 'slip-sec' }, [
-      el('label', { class: 'consent', for: 'consent' }, [check, el('span', { text: 'Approve this hedge and a $25 failover budget for a sandbox run. In-app approval, not a Ledger signature.' })]),
+      toggle,
+      consentBlock,
       el('div', { class: 'slip-cta' }, [go]),
       el('div', { id: 'run-status', role: 'status' }),
       el('p', { class: 'slip-foot', title: plan.planHash, text: 'Prices are re-checked when you approve. Plan ' + shortHash(plan.planHash) })
     ]));
   }
 
-  async function execute(plan) {
+  function ledgerReady() {
+    return !!(state.ledgerStatus && state.ledgerStatus.enabled && state.ledgerStatus.reachable);
+  }
+
+  function modelName() {
+    var model = String((state.ledgerStatus && state.ledgerStatus.model) || 'STAX').toLowerCase().replace(/_/g, ' ');
+    return 'Ledger ' + model.charAt(0).toUpperCase() + model.slice(1);
+  }
+
+  // The emulator screen, live. Click to tap; keep the mouse down to hold to sign.
+  function devicePanel(planHash) {
+    var img = el('img', { class: 'device-screen', alt: 'Ledger screen. Click to tap, keep the mouse down to hold.', draggable: 'false' });
+    var pressed = null;
+    function send(action, point) {
+      fetch('/demo/ledger/finger', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: action, x: point.x, y: point.y }) }).catch(function () {});
+    }
+    img.addEventListener('pointerdown', function (event) {
+      if (!img.naturalWidth) return;
+      event.preventDefault();
+      img.setPointerCapture(event.pointerId);
+      var rect = img.getBoundingClientRect();
+      pressed = {
+        x: Math.round(((event.clientX - rect.left) * img.naturalWidth) / rect.width),
+        y: Math.round(((event.clientY - rect.top) * img.naturalHeight) / rect.height)
+      };
+      send('press', pressed);
+    });
+    function release() {
+      if (!pressed) return;
+      send('release', pressed);
+      pressed = null;
+    }
+    img.addEventListener('pointerup', release);
+    img.addEventListener('pointercancel', release);
+    function refresh() {
+      var next = new Image();
+      next.onload = function () { img.src = next.src; };
+      next.src = '/demo/ledger/screen?t=' + Date.now();
+    }
+    refresh();
+    var timer = setInterval(refresh, 450);
+    return {
+      node: el('div', { class: 'device' }, [
+        el('p', { class: 'device-hint', text: 'Review on the device. The memo is this plan, ending in ' + hashEnding(planHash) + '. Then hold to sign.' }),
+        img,
+        el('p', { class: 'device-foot', text: modelName() + ' emulator (Speculos) running the XRP app' })
+      ]),
+      stop: function () { clearInterval(timer); }
+    };
+  }
+
+  async function execute(plan, method) {
     if (state.busy) return;
     state.busy = true;
     var go = $('run');
     go.disabled = true;
-    $('consent').disabled = true;
+    if ($('consent')) $('consent').disabled = true;
     clear(go);
     go.appendChild(el('span', { class: 'spinner', 'aria-hidden': 'true' }));
-    go.appendChild(document.createTextNode('Approving'));
-    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true });
+    go.appendChild(document.createTextNode(method === 'ledger' ? 'Waiting for the Ledger' : 'Approving'));
+    var panel = method === 'ledger' ? devicePanel(plan.planHash) : null;
+    if (panel) $('run-status').appendChild(panel.node);
+    var result = await post('/demo/execute', { company: state.analysis.company, mode: state.mode, reviewedPlan: plan, confirm: true, approval: method === 'ledger' ? 'ledger' : 'app' });
+    if (panel) panel.stop();
     state.busy = false;
     if (result.status === 409 && result.body.requote && result.body.plan) {
       acceptQuote(result.body);
@@ -1241,6 +1524,21 @@ function renderPage(previews) {
     renderSlip();
   }
 
+  function drillCopy(failover) {
+    var state = failover && failover.state ? String(failover.state) : '';
+    var spend = usd((failover && failover.ap4mSpendingUsd) || '0');
+    if (state === 'RLUSD_SETTLED') return 'The agent paid ' + spend + ' and settlement returned an RLUSD payout.';
+    if (state === 'VOUCHER_SIGNED') return 'Inside the $25 budget you approved, the agent signed a mock voucher for backup capacity. No RLUSD moved. Mastercard Agent Pay stays idle until the portal credentials are set.';
+    if (!state) return 'The outage drill did not run.';
+    return 'The drill stopped at ' + state.replace(/_/g, ' ').toLowerCase() + '. Agent spend ' + spend + '.';
+  }
+
+  function chainCopy(network) {
+    if (!network || network.blockNumber === null || network.blockNumber === undefined) return 'The testnet head was not read on this run.';
+    var via = network.provider === 'quicknode' ? 'QuickNode' : 'the public XRPL EVM testnet RPC';
+    return 'Read block ' + network.blockNumber + ' through ' + via + '.';
+  }
+
   function renderReceipt(root, body) {
     var steps = body.steps || [];
     var run = body.run || {};
@@ -1249,27 +1547,35 @@ function renderPage(previews) {
     var orders = Array.isArray(run.orders) ? run.orders : [];
     var plan = body.plan || (state.quoted && state.quoted.plan) || {};
     var noTrade = !orders.length && steps.some(function (step) { return step.name === 'orders'; });
+    var headline = body.ok ? (noTrade ? 'Nothing to place' : 'Outage handled in sandbox') : 'Run stopped';
+    var sub = orders.length
+      ? orders.length + (orders.length === 1 ? ' simulated fill, ' : ' simulated fills, ') + usd(plan.estimatedTotalCostUsd) + ' premium'
+      : 'No order submitted';
     root.appendChild(el('div', { class: 'slip-sec' }, [
       el('div', { class: 'receipt-head' }, [
         el('span', { class: 'tick ' + (body.ok ? 'ok' : 'bad'), 'aria-hidden': 'true', text: body.ok ? '\u2713' : '!' }),
-        el('div', {}, [
-          el('strong', { text: body.ok ? (noTrade ? 'Nothing to place' : 'Placed in sandbox') : 'Run stopped' }),
-          el('span', { text: orders.length ? orders.length + (orders.length === 1 ? ' simulated order, ' : ' simulated orders, ') + usd(plan.estimatedTotalCostUsd) + ' premium' : 'No order submitted' })
+        el('div', {}, [el('strong', { text: headline }), el('span', { text: sub })])
+      ])
+    ]));
+    if (body.ok && !noTrade) {
+      root.appendChild(el('div', { class: 'slip-sec' }, [
+        el('ol', { class: 'story' }, [
+          el('li', {}, [el('span', { class: 'n', text: '1' }), el('div', {}, [el('b', { text: 'The hedge is on' }), el('span', { text: 'Sandbox fill at ' + (orders.map(function (order) { return usd(order.averageFillPriceUsd); }).join(', ') || 'the quoted price') + '. Simulated. Nothing reached a live venue.' })])]),
+          el('li', {}, [el('span', { class: 'n', text: '2' }), el('div', {}, [el('b', { text: 'The primary API goes down' }), el('span', { text: drillCopy(failover) })])]),
+          el('li', {}, [el('span', { class: 'n', text: '3' }), el('div', {}, [el('b', { text: 'The chain was read' }), el('span', { text: chainCopy(network) })])]),
+          body.ledger ? el('li', {}, [el('span', { class: 'n', text: '4' }), el('div', {}, [el('b', { text: 'Approved on the Ledger' }), el('span', {}, [el('a', { href: body.ledger.explorerUrl, target: '_blank', rel: 'noopener', title: body.ledger.txHash, text: shortHash(body.ledger.txHash) })])])]) : null
         ])
+      ]));
+    }
+    root.appendChild(el('div', { class: 'slip-sec' }, [
+      body.note ? el('p', { class: 'note-line', text: body.note }) : null,
+      el('details', { class: 'trace' }, [
+        el('summary', { text: 'Run trace' }),
+        el('ol', { class: 'steps' }, steps.map(function (step) {
+          var good = step.status >= 200 && step.status < 300;
+          return el('li', { class: good ? '' : 'bad' }, [el('span', {}, [STEP[step.name] || step.name, good ? null : el('small', { text: step.detail })])]);
+        }))
       ]),
-      el('p', { class: 'note-line', style: 'margin-top:0.85rem', text: body.note || '' })
-    ]));
-    root.appendChild(el('div', { class: 'slip-sec' }, [
-      el('ol', { class: 'steps' }, steps.map(function (step) {
-        var good = step.status >= 200 && step.status < 300;
-        return el('li', { class: good ? '' : 'bad' }, [el('span', {}, [STEP[step.name] || step.name, good ? null : el('small', { text: step.detail })])]);
-      }))
-    ]));
-    root.appendChild(el('div', { class: 'slip-sec' }, [
-      el('div', { class: 'line-item' }, [el('span', { text: 'Orders' }), el('b', { text: orders.length ? orders.map(function (order) { return order.filledQuantity + ' filled at ' + usd(order.averageFillPriceUsd); }).join(', ') : 'None' })]),
-      el('div', { class: 'line-item' }, [el('span', { text: 'Outage drill' }), el('b', { text: failover.state ? failover.state.replace(/_/g, ' ').toLowerCase() : 'Not run' })]),
-      el('div', { class: 'line-item' }, [el('span', { text: 'Agent spend' }), el('b', { text: usd(failover.ap4mSpendingUsd || '0') })]),
-      el('div', { class: 'line-item' }, [el('span', { text: 'XRPL EVM testnet' }), el('b', { text: network.blockNumber !== null && network.blockNumber !== undefined ? 'Block ' + network.blockNumber : 'Not read' })]),
       el('button', { class: 'btn btn-ghost btn-lg', type: 'button', style: 'margin-top:1rem', onclick: function () { state.result = null; renderSlip(); } }, ['Back to the hedge'])
     ]));
   }
@@ -1325,7 +1631,27 @@ function renderPage(previews) {
     ]);
   }
 
-  fetch('/demo/sponsors').then(function (response) { return response.json(); }).then(function (s) {
+  var ledgerStatusLoad = fetch('/demo/ledger/status').then(function (response) { return response.json(); }).then(function (status) {
+    state.ledgerStatus = status;
+    if (ledgerReady()) {
+      var claim = $('claim-ledger');
+      clear(claim);
+      claim.appendChild(el('strong', { text: 'Ledger.' }));
+      claim.appendChild(document.createTextNode(' Plans can be approved on a ' + modelName() + ' emulator (Speculos) running the real XRP app. The server verifies each signature, account, and plan hash, then submits it to XRPL testnet. This is an emulator, not a physical device. ledger_agent_intent stays unsupported on chain id 1449000.'));
+    }
+    if (state.phase === 'priced' && !state.busy) renderSlip();
+    return status;
+  }).catch(function () { return null; });
+
+  fetch('/demo/network').then(function (response) { return response.json(); }).then(function (network) {
+    var meta = $('chain-meta');
+    if (!meta || !network || network.blockNumber === null || network.blockNumber === undefined || !network.chainMatches) return;
+    meta.textContent = 'XRPL EVM testnet, block ' + network.blockNumber;
+  }).catch(function () {});
+
+  Promise.all([fetch('/demo/sponsors').then(function (response) { return response.json(); }), ledgerStatusLoad]).then(function (loaded) {
+    var s = loaded[0];
+    var device = loaded[1];
     var root = $('sponsors');
     clear(root);
     var ap4m = s.ap4m || {};
@@ -1339,7 +1665,11 @@ function renderPage(previews) {
     root.appendChild(sponsor('Mastercard Agent Pay', missing.length ? amber : green, missing.length ? 'Waiting on credentials' : 'Configured, ' + (ap4m.mode || 'mode unknown'), (ap4m.note || '') + (missing.length ? ' Missing: ' + missing.join(', ') + '.' : '')));
     root.appendChild(sponsor('QuickNode', quicknode.provider === 'quicknode' ? green : amber, quicknode.provider === 'quicknode' ? 'Connected' : 'Public RPC instead', (quicknode.label || '') + (typeof quicknode.eventCount === 'number' ? ' VoucherRedeemed logs in the recent window: ' + quicknode.eventCount + '.' : '')));
     if (s.aws) root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
-    root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'No device connected', ledger.note || ''));
+    if (device && device.enabled && device.reachable) {
+      root.appendChild(sponsor('Ledger', green, 'Emulator connected', device.note + ' Account ' + device.address + ' on XRPL testnet.'));
+    } else {
+      root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'No device connected', (device && device.enabled ? device.note + ' ' : '') + (ledger.note || '')));
+    }
   }).catch(function () {
     var root = $('sponsors');
     clear(root);
@@ -4606,14 +4936,7 @@ async function buildSearch(args) {
     "Capacity offers have verifiedCapacity false until a live load test and reservation exist.",
     `Switchboard fee schedule ${SWITCHBOARD_SANDBOX_FEES.version} is a sandbox model. Kalshi and Polymarket category fees are not reused.`
   ];
-  if (request.includeReferenceMarkets) {
-    const weather = syntheticWeatherQuote(store, request, exposure, quotedAt, expiresAt);
-    quotes.push(weather);
-    store.quotes.set(weather.quoteId, { quote: weather, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
-    const international = syntheticInternationalQuote(store, request, exposure, quotedAt, expiresAt);
-    quotes.push(international);
-    store.quotes.set(international.quoteId, { quote: international, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
-  }
+  let liveKalshi = false;
   if (args.kalshiEnabled) {
     const live = await loadKalshiReference({
       baseUrl: config.kalshiBaseUrl,
@@ -4627,6 +4950,7 @@ async function buildSearch(args) {
       fetchImpl: args.fetchImpl
     });
     if (live) {
+      liveKalshi = true;
       quotes.push(live);
       store.quotes.set(live.quoteId, { quote: live, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
       warnings.push("Kalshi public market data was read. Fees were not applied. The row is read_only and not executable.");
@@ -4635,6 +4959,16 @@ async function buildSearch(args) {
     }
   } else {
     warnings.push("Kalshi public read was not requested; no source=live row is returned.");
+  }
+  if (request.includeReferenceMarkets) {
+    if (!liveKalshi) {
+      const weather = syntheticWeatherQuote(store, request, exposure, quotedAt, expiresAt);
+      quotes.push(weather);
+      store.quotes.set(weather.quoteId, { quote: weather, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
+    }
+    const international = syntheticInternationalQuote(store, request, exposure, quotedAt, expiresAt);
+    quotes.push(international);
+    store.quotes.set(international.quoteId, { quote: international, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
   }
   if (config.polymarketUsApiKey) {
     warnings.push("POLYMARKET_US_API_KEY is set, but no Polymarket US book was verified. No live US book is invented and orders are rejected.");
@@ -5165,10 +5499,10 @@ function aiDemo(request) {
     confidence: 0.6
   }];
   return {
-    company: shell(request, "co_demo_ai", "Demo Support AI (fictional)", exposures, scenarios),
+    company: shell(request, "co_demo_ai", "Northline Support", exposures, scenarios),
     assumptions: [
       provenance("ai_demo", false),
-      "All company data are fictional. Loss scenarios are synthetic and user-editable.",
+      "Illustrative case. Loss scenarios are a template until you edit them.",
       "Primary and fallback models must pass task-specific equivalence checks."
     ],
     warnings: [
@@ -5194,7 +5528,7 @@ function retailDemo(request) {
     confidence: 0.5
   }];
   return {
-    company: shell(request, "co_retail_demo", "Demo Coastal Retailer (fictional)", exposures, scenarios),
+    company: shell(request, "co_retail_demo", "Harbor Retail", exposures, scenarios),
     assumptions: [
       provenance("retail_demo", false),
       "Illustrative retailer; scenario losses and frequencies require user validation."
@@ -6123,7 +6457,8 @@ function buildApp3(options = {}) {
 if (Number(process.env.QUOTE_TTL_SECONDS ?? "0") < 900) {
   process.env.QUOTE_TTL_SECONDS = "900";
 }
-if (!process.env.KALSHI_ENABLED) process.env.KALSHI_ENABLED = "false";
+if (!process.env.KALSHI_ENABLED) process.env.KALSHI_ENABLED = "true";
+if (!process.env.KALSHI_TIMEOUT_MS) process.env.KALSHI_TIMEOUT_MS = "4000";
 if (!(process.env.AP4M_TEAM_NAME ?? "").trim() && !(process.env.TEAM_NAME ?? "").trim()) {
   process.env.AP4M_TEAM_NAME = "Penn";
 }
@@ -6132,7 +6467,7 @@ var PRIMARY = "https://primary.invalid/infer";
 var FALLBACK = "https://fallback.invalid/infer";
 var PLAN_MODES = ["min_cvar", "min_cost", "balanced"];
 var SAMPLE_INTAKE = {
-  description: "Fictional AI customer-support service that depends on primary model API",
+  description: "Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.",
   jurisdiction: "US",
   monthlyHedgeBudgetUsd: "800",
   maxTolerableTailLossUsd: "8000"
@@ -6232,11 +6567,16 @@ function invocationEnv() {
   return blocked;
 }
 async function createDemoApp() {
+  const ledgerSettings = ledgerConfig(process.env);
+  const ledger = ledgerSettings ? new LedgerApprover(ledgerSettings) : null;
   const strategy = buildApp3();
-  const markets = await buildApp2({ kalshiEnabled: false });
+  const markets = await buildApp2({ kalshiEnabled: process.env.KALSHI_ENABLED !== "false" });
   const execution = await buildApp({
     fetchImpl: injectFetch(markets),
-    config: void 0
+    config: void 0,
+    // Execution accepts ledger_dmk_verified only from this gateway, and only after the gateway has
+    // verified the device signature itself. Without the emulator configured, it stays off.
+    env: { ...process.env, LEDGER_DMK_VERIFIED: ledger ? "true" : "false" }
   });
   await strategy.ready();
   await markets.ready();
@@ -6248,6 +6588,36 @@ async function createDemoApp() {
     previews: SAMPLE_XRPL_TRANSACTIONS.map((tx) => previewXrplTransaction(tx))
   }));
   gateway2.get("/demo/sponsors", async () => sponsorStatus(process.env));
+  gateway2.get("/demo/ledger/status", async () => ledger ? ledger.status() : {
+    enabled: false,
+    reachable: false,
+    emulator: false,
+    model: null,
+    address: null,
+    note: "Ledger approval is not configured on this deploy. Plans are approved in the app."
+  });
+  gateway2.get("/demo/ledger/screen", async (_request, reply) => {
+    if (!ledger) return reply.code(404).send({ message: "Ledger approval is not configured." });
+    try {
+      const response = await ledger.screenshot();
+      if (!response.ok) return reply.code(502).send({ message: "The emulator did not return its screen." });
+      return reply.type("image/png").header("cache-control", "no-store").send(Buffer.from(await response.arrayBuffer()));
+    } catch {
+      return reply.code(502).send({ message: "The emulator did not answer." });
+    }
+  });
+  gateway2.post("/demo/ledger/finger", async (request, reply) => {
+    if (!ledger) return reply.code(404).send({ message: "Ledger approval is not configured." });
+    const body = isRecord6(request.body) ? request.body : {};
+    const action = body.action;
+    const x = Number(body.x);
+    const y = Number(body.y);
+    if (action !== "press" && action !== "release" || !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x > 2e3 || y > 2e3) {
+      return reply.code(400).send({ message: "Send action press or release, with integer x and y." });
+    }
+    await ledger.finger(action, x, y).catch(() => void 0);
+    return { ok: true };
+  });
   if (awsAgentCoreEnabled(process.env)) {
     gateway2.get("/ping", async () => ({
       status: "Healthy",
@@ -6321,6 +6691,10 @@ async function createDemoApp() {
     if (!isRecord6(reviewed) || !Array.isArray(reviewed.legs) || typeof reviewed.estimatedTotalCostUsd !== "string") {
       return reply.code(400).send({ message: "Send the reviewedPlan you approved." });
     }
+    const approval = request.body.approval === "ledger" ? "ledger" : "app";
+    if (approval === "ledger" && !ledger) {
+      return reply.code(400).send({ message: "Ledger approval is not configured on this deploy. Approve in the app instead." });
+    }
     const steps = [];
     const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message, steps });
@@ -6333,9 +6707,32 @@ async function createDemoApp() {
         books: quoted.books
       });
     }
+    const legs = Array.isArray(quoted.plan.legs) ? quoted.plan.legs : [];
+    let ledgerApproval = null;
+    const reviewedHash = typeof reviewed.planHash === "string" ? reviewed.planHash : "";
+    if (approval === "ledger" && legs.length > 0 && ledger) {
+      if (!/^sha256:[0-9a-f]{64}$/.test(reviewedHash)) {
+        return reply.code(400).send({ message: "The reviewed plan has no valid hash to sign. Nothing was ordered." });
+      }
+      try {
+        ledgerApproval = await ledger.approve(reviewedHash);
+        steps.push({ name: "ledger", status: 200, detail: ledgerApproval.txHash });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The Ledger approval failed.";
+        steps.push({ name: "ledger", status: 409, detail: message });
+        return reply.code(409).send({ ok: false, steps, plan: quoted.plan, note: `${message} Nothing was ordered.`, syntheticDemo: true });
+      }
+    }
     const network = await readNetwork(process.env);
-    const outcome = await executePlan(execution, quoted.plan, steps);
-    return reply.code(outcome.ok ? 200 : 409).send({ ...outcome, steps, plan: quoted.plan, network, syntheticDemo: true });
+    const outcome = await executePlan(execution, quoted.plan, steps, ledgerApproval ? { method: "ledger_dmk_verified", signedIntent: `dmk:${reviewedHash}`, deviceProofId: ledgerApproval.txHash } : void 0);
+    return reply.code(outcome.ok ? 200 : 409).send({
+      ...outcome,
+      steps,
+      plan: quoted.plan,
+      network,
+      ledger: ledgerApproval ? { ...ledgerApproval, signedPlanHash: reviewedHash } : null,
+      syntheticDemo: true
+    });
   });
   gateway2.get("/", async (_request, reply) => {
     const previews = SAMPLE_XRPL_TRANSACTIONS.map((tx) => previewXrplTransaction(tx));
@@ -6412,7 +6809,7 @@ async function quoteAndPlan(strategy, markets, company, mode, steps) {
   }
   return { ok: true, search: search.body, plan: generated.body, books: await readBooks(markets) };
 }
-async function executePlan(execution, plan, steps) {
+async function executePlan(execution, plan, steps, approval = { method: "app_manual", signedIntent: `app_manual:${String(plan.planHash)}` }) {
   const outcome = { ok: false, note: "", approval: null, run: null, failover: null };
   const legs = Array.isArray(plan.legs) ? plan.legs.filter(isRecord6) : [];
   if (legs.length === 0) {
@@ -6436,8 +6833,7 @@ async function executePlan(execution, plan, steps) {
     return { ...outcome, note: "Execution did not open an approval. No order was submitted." };
   }
   const confirmed = await call(execution, "POST", `/v1/execution/approvals/${encodeURIComponent(created.body.approvalId)}/confirm`, {
-    method: "app_manual",
-    signedIntent: `app_manual:${String(plan.planHash)}`
+    ...approval
   });
   steps.push({ name: "confirm", status: confirmed.status, detail: detailOf(confirmed.body, "confirm") });
   if (!isRecord6(confirmed.body) || confirmed.body.status !== "APPROVED") {

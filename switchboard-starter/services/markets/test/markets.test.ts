@@ -332,6 +332,35 @@ describe("market search and execution authorization", () => {
     expect(quote?.askUsd).toBe("0.01");
     expect(quote?.eligibilityReason.toLowerCase()).toContain("not executable");
   });
+
+  it("drops the synthetic weather example once a live Kalshi row is attached", async () => {
+    const fetchImpl = (async (url: string) => {
+      if (String(url).includes("orderbook")) {
+        return new Response(JSON.stringify({ orderbook_fp: { no_dollars: [["0.9900", "206.00"]], yes_dollars: [] } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        markets: [{
+          ticker: "KXHIGHNY-TEST",
+          title: "Will the maximum temperature be >71°?",
+          rules_primary: "If the maximum temperature in New York is greater than 71 degrees, resolve Yes.",
+          expiration_time: "2026-11-01T14:00:00Z",
+          yes_bid_dollars: "0.0000",
+          yes_ask_dollars: "0.0100",
+          yes_ask_size_fp: "206.00",
+        }],
+      }), { status: 200 });
+    }) as typeof fetch;
+    ({ app } = await testApp({ kalshiEnabled: true, fetchImpl }));
+    const response = await search(app, searchBody(), "search-live-kalshi");
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as MarketSearchResponse;
+    const live = body.quotes.find((quote) => quote.source === "live");
+    expect(live?.capability).toBe("read_only");
+    expect(live?.venue).toBe("kalshi");
+    expect(body.quotes.some((quote) => quote.instrument.instrumentId === "synthetic_weather_temp_reference")).toBe(false);
+    expect(body.quotes.some((quote) => quote.venue === "polymarket_international")).toBe(true);
+    expect(body.quotes.some((quote) => quote.instrument.instrumentId === OUTAGE_ID && quote.source === "sandbox")).toBe(true);
+  });
 });
 
 function orderFor(quote: MarketQuote, quantity: string) {

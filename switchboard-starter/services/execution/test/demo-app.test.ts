@@ -133,6 +133,24 @@ describe("POST /demo/execute", () => {
   });
 });
 
+describe("Ledger approval without an emulator", () => {
+  it("reports Ledger as off and keeps its routes closed", async () => {
+    const status = await app.inject({ method: "GET", url: "/demo/ledger/status" });
+    expect(JSON.parse(status.body)).toMatchObject({ enabled: false, reachable: false });
+    expect((await app.inject({ method: "GET", url: "/demo/ledger/screen" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/demo/ledger/finger", payload: { action: "press", x: 1, y: 1 } })).statusCode).toBe(404);
+  });
+
+  it("refuses a Ledger approval and orders nothing", async () => {
+    const company = await confirmedCompany();
+    const quoted = await post("/demo/quote", { company, mode: "min_cvar" });
+    const { status, body } = await post("/demo/execute", { company, mode: "min_cvar", reviewedPlan: quoted.body.plan, confirm: true, approval: "ledger" });
+    expect(status).toBe(400);
+    expect(body.message).toContain("Approve in the app");
+    expect(body).not.toHaveProperty("steps");
+  });
+});
+
 describe("POST /demo/proof", () => {
   it("runs the sample end to end and returns what the page renders", async () => {
     const { status, body } = await post("/demo/proof", { confirm: true });

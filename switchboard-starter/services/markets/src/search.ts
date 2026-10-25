@@ -98,15 +98,7 @@ export async function buildSearch(args: {
     `Switchboard fee schedule ${SWITCHBOARD_SANDBOX_FEES.version} is a sandbox model. Kalshi and Polymarket category fees are not reused.`,
   ];
 
-  if (request.includeReferenceMarkets) {
-    const weather = syntheticWeatherQuote(store, request, exposure, quotedAt, expiresAt);
-    quotes.push(weather);
-    store.quotes.set(weather.quoteId, { quote: weather, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
-    const international = syntheticInternationalQuote(store, request, exposure, quotedAt, expiresAt);
-    quotes.push(international);
-    store.quotes.set(international.quoteId, { quote: international, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
-  }
-
+  let liveKalshi = false;
   if (args.kalshiEnabled) {
     const live = await loadKalshiReference({
       baseUrl: config.kalshiBaseUrl,
@@ -120,6 +112,7 @@ export async function buildSearch(args: {
       fetchImpl: args.fetchImpl,
     });
     if (live) {
+      liveKalshi = true;
       quotes.push(live);
       store.quotes.set(live.quoteId, { quote: live, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
       warnings.push("Kalshi public market data was read. Fees were not applied. The row is read_only and not executable.");
@@ -128,6 +121,18 @@ export async function buildSearch(args: {
     }
   } else {
     warnings.push("Kalshi public read was not requested; no source=live row is returned.");
+  }
+
+  if (request.includeReferenceMarkets) {
+    // A live Kalshi row already shows a real public price. The synthetic weather example would sit beside it and look like the live price.
+    if (!liveKalshi) {
+      const weather = syntheticWeatherQuote(store, request, exposure, quotedAt, expiresAt);
+      quotes.push(weather);
+      store.quotes.set(weather.quoteId, { quote: weather, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
+    }
+    const international = syntheticInternationalQuote(store, request, exposure, quotedAt, expiresAt);
+    quotes.push(international);
+    store.quotes.set(international.quoteId, { quote: international, executable: false, mode: "snapshot", snapshotRemaining: D(0) });
   }
 
   if (config.polymarketUsApiKey) {

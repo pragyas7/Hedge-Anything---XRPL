@@ -148,10 +148,10 @@ function aiDemo(request: CompanyAnalyzeRequest): CompanyAnalysisResponse {
     confidence: 0.6,
   }];
   return {
-    company: shell(request, 'co_demo_ai', 'Demo Support AI (fictional)', exposures, scenarios),
+    company: shell(request, 'co_demo_ai', 'Northline Support', exposures, scenarios),
     assumptions: [
       provenance('ai_demo', false),
-      'All company data are fictional. Loss scenarios are synthetic and user-editable.',
+      'Illustrative case. Loss scenarios are a template until you edit them.',
       'Primary and fallback models must pass task-specific equivalence checks.',
     ],
     warnings: [
@@ -178,7 +178,7 @@ function retailDemo(request: CompanyAnalyzeRequest): CompanyAnalysisResponse {
     confidence: 0.5,
   }];
   return {
-    company: shell(request, 'co_retail_demo', 'Demo Coastal Retailer (fictional)', exposures, scenarios),
+    company: shell(request, 'co_retail_demo', 'Harbor Retail', exposures, scenarios),
     assumptions: [
       provenance('retail_demo', false),
       'Illustrative retailer; scenario losses and frequencies require user validation.',

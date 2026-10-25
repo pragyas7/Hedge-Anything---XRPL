@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { Decimal } from "decimal.js";
 import Fastify, { type FastifyInstance } from "fastify";
+import { LedgerApprover, ledgerConfig, type LedgerApproval } from "./ledger.js";
 import { renderPage } from "./page.js";
 import { awsAgentCoreEnabled, handleInvocation } from "../services/execution/src/aws-agentcore.js";
 import { SAMPLE_XRPL_TRANSACTIONS, previewXrplTransaction, type ClearSignPreview } from "../services/execution/src/clear-sign.js";
@@ -18,7 +19,8 @@ import { buildApp as buildStrategy } from "../services/strategy/src/app.js";
 if (Number(process.env.QUOTE_TTL_SECONDS ?? "0") < 900) {
   process.env.QUOTE_TTL_SECONDS = "900";
 }
-if (!process.env.KALSHI_ENABLED) process.env.KALSHI_ENABLED = "false";
+if (!process.env.KALSHI_ENABLED) process.env.KALSHI_ENABLED = "true";
+if (!process.env.KALSHI_TIMEOUT_MS) process.env.KALSHI_TIMEOUT_MS = "4000";
 if (!(process.env.AP4M_TEAM_NAME ?? "").trim() && !(process.env.TEAM_NAME ?? "").trim()) {
   process.env.AP4M_TEAM_NAME = "Penn";
 }
@@ -64,7 +66,7 @@ type PlanMode = "min_cvar" | "min_cost" | "balanced";
 const PLAN_MODES: readonly PlanMode[] = ["min_cvar", "min_cost", "balanced"];
 
 const SAMPLE_INTAKE = {
-  description: "Fictional AI customer-support service that depends on primary model API",
+  description: "Northline runs customer-support on one primary model API. A fifteen-minute outage takes the product offline.",
   jurisdiction: "US",
   monthlyHedgeBudgetUsd: "800",
   maxTolerableTailLossUsd: "8000",
@@ -175,11 +177,16 @@ function invocationEnv(): NodeJS.ProcessEnv {
 }
 
 export async function createDemoApp() {
+  const ledgerSettings = ledgerConfig(process.env);
+  const ledger = ledgerSettings ? new LedgerApprover(ledgerSettings) : null;
   const strategy = buildStrategy();
-  const markets = await buildMarkets({ kalshiEnabled: false });
+  const markets = await buildMarkets({ kalshiEnabled: process.env.KALSHI_ENABLED !== "false" });
   const execution = await buildExecution({
     fetchImpl: injectFetch(markets),
     config: undefined,
+    // Execution accepts ledger_dmk_verified only from this gateway, and only after the gateway has
+    // verified the device signature itself. Without the emulator configured, it stays off.
+    env: { ...process.env, LEDGER_DMK_VERIFIED: ledger ? "true" : "false" },
   });
   await strategy.ready();
   await markets.ready();
@@ -196,6 +203,39 @@ export async function createDemoApp() {
   }));
 
   gateway.get("/demo/sponsors", async () => sponsorStatus(process.env));
+
+  gateway.get("/demo/ledger/status", async () => ledger ? ledger.status() : {
+    enabled: false,
+    reachable: false,
+    emulator: false,
+    model: null,
+    address: null,
+    note: "Ledger approval is not configured on this deploy. Plans are approved in the app.",
+  });
+
+  gateway.get("/demo/ledger/screen", async (_request, reply) => {
+    if (!ledger) return reply.code(404).send({ message: "Ledger approval is not configured." });
+    try {
+      const response = await ledger.screenshot();
+      if (!response.ok) return reply.code(502).send({ message: "The emulator did not return its screen." });
+      return reply.type("image/png").header("cache-control", "no-store").send(Buffer.from(await response.arrayBuffer()));
+    } catch {
+      return reply.code(502).send({ message: "The emulator did not answer." });
+    }
+  });
+
+  gateway.post("/demo/ledger/finger", async (request, reply) => {
+    if (!ledger) return reply.code(404).send({ message: "Ledger approval is not configured." });
+    const body = isRecord(request.body) ? request.body : {};
+    const action = body.action;
+    const x = Number(body.x);
+    const y = Number(body.y);
+    if ((action !== "press" && action !== "release") || !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x > 2000 || y > 2000) {
+      return reply.code(400).send({ message: "Send action press or release, with integer x and y." });
+    }
+    await ledger.finger(action, x, y).catch(() => undefined);
+    return { ok: true };
+  });
 
   /** AWS AgentCore track is parked. Set AWS_AGENTCORE_ENABLED=true to serve these routes again. */
   if (awsAgentCoreEnabled(process.env)) {
@@ -285,6 +325,10 @@ export async function createDemoApp() {
     if (!isRecord(reviewed) || !Array.isArray(reviewed.legs) || typeof reviewed.estimatedTotalCostUsd !== "string") {
       return reply.code(400).send({ message: "Send the reviewedPlan you approved." });
     }
+    const approval = request.body.approval === "ledger" ? "ledger" : "app";
+    if (approval === "ledger" && !ledger) {
+      return reply.code(400).send({ message: "Ledger approval is not configured on this deploy. Approve in the app instead." });
+    }
     const steps: Step[] = [];
     const quoted = await quoteAndPlan(strategy, markets, input.company, input.mode, steps);
     if (!quoted.ok) return reply.code(quoted.status >= 400 ? quoted.status : 502).send({ message: quoted.message, steps });
@@ -297,9 +341,36 @@ export async function createDemoApp() {
         books: quoted.books,
       });
     }
+    const legs = Array.isArray(quoted.plan.legs) ? quoted.plan.legs : [];
+    let ledgerApproval: LedgerApproval | null = null;
+    // The device signs the hash of the plan the person reviewed, so the screen matches the slip.
+    // sameTerms above already guarantees the fresh plan has the same legs and no higher premium.
+    const reviewedHash = typeof reviewed.planHash === "string" ? reviewed.planHash : "";
+    if (approval === "ledger" && legs.length > 0 && ledger) {
+      if (!/^sha256:[0-9a-f]{64}$/.test(reviewedHash)) {
+        return reply.code(400).send({ message: "The reviewed plan has no valid hash to sign. Nothing was ordered." });
+      }
+      try {
+        ledgerApproval = await ledger.approve(reviewedHash);
+        steps.push({ name: "ledger", status: 200, detail: ledgerApproval.txHash });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The Ledger approval failed.";
+        steps.push({ name: "ledger", status: 409, detail: message });
+        return reply.code(409).send({ ok: false, steps, plan: quoted.plan, note: `${message} Nothing was ordered.`, syntheticDemo: true });
+      }
+    }
     const network = await readNetwork(process.env);
-    const outcome = await executePlan(execution, quoted.plan, steps);
-    return reply.code(outcome.ok ? 200 : 409).send({ ...outcome, steps, plan: quoted.plan, network, syntheticDemo: true });
+    const outcome = await executePlan(execution, quoted.plan, steps, ledgerApproval
+      ? { method: "ledger_dmk_verified", signedIntent: `dmk:${reviewedHash}`, deviceProofId: ledgerApproval.txHash }
+      : undefined);
+    return reply.code(outcome.ok ? 200 : 409).send({
+      ...outcome,
+      steps,
+      plan: quoted.plan,
+      network,
+      ledger: ledgerApproval ? { ...ledgerApproval, signedPlanHash: reviewedHash } : null,
+      syntheticDemo: true,
+    });
   });
 
   gateway.get("/", async (_request, reply) => {
@@ -409,7 +480,18 @@ interface Executed {
 }
 
 /** Approval, app_manual confirmation, sandbox orders, failover arm, and the mock failover. */
-async function executePlan(execution: FastifyInstance, plan: Record<string, unknown>, steps: Step[]): Promise<Executed> {
+interface ApprovalConfirm {
+  method: "app_manual" | "ledger_dmk_verified";
+  signedIntent: string;
+  deviceProofId?: string;
+}
+
+async function executePlan(
+  execution: FastifyInstance,
+  plan: Record<string, unknown>,
+  steps: Step[],
+  approval: ApprovalConfirm = { method: "app_manual", signedIntent: `app_manual:${String(plan.planHash)}` },
+): Promise<Executed> {
   const outcome: Executed = { ok: false, note: "", approval: null, run: null, failover: null };
   const legs = Array.isArray(plan.legs) ? plan.legs.filter(isRecord) : [];
   if (legs.length === 0) {
@@ -434,8 +516,7 @@ async function executePlan(execution: FastifyInstance, plan: Record<string, unkn
     return { ...outcome, note: "Execution did not open an approval. No order was submitted." };
   }
   const confirmed = await call(execution, "POST", `/v1/execution/approvals/${encodeURIComponent(created.body.approvalId)}/confirm`, {
-    method: "app_manual",
-    signedIntent: `app_manual:${String(plan.planHash)}`,
+    ...approval,
   });
   steps.push({ name: "confirm", status: confirmed.status, detail: detailOf(confirmed.body, "confirm") });
   if (!isRecord(confirmed.body) || confirmed.body.status !== "APPROVED") {
