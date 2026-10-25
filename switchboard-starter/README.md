@@ -33,7 +33,9 @@ Describe a company → confirm exposures and risk budget → aggregate comparabl
 
 Public one-shot proof: [https://switchboard-hackathon.vercel.app](https://switchboard-hackathon.vercel.app). The button runs analysis, a sandbox quote, `app_manual` approval, simulated orders, and a mock failover in one process. Orders stay `SIMULATED`. Failover stops at `VOUCHER_SIGNED` until AP4M credentials exist. The chain card is the public XRPL EVM testnet RPC unless `QUICKNODE_RPC_URL` is set. `ledger_agent_intent` stays unsupported on chain id 1449000.
 
-Local one-process page: `pnpm demo`, then [http://127.0.0.1:4110](http://127.0.0.1:4110). Before another Vercel deploy, run `pnpm bundle:demo` so `api/index.mjs` matches `server.ts`.
+Local one-process page: `pnpm demo`, then [http://127.0.0.1:4110](http://127.0.0.1:4110). The gateway lives in `demo/app.ts` and the page in `demo/page.ts`; `server.ts` only starts it. Before another Vercel deploy, run `pnpm bundle:demo` so `api/index.mjs` matches the source. The judge walkthrough is [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
+
+AP4M go-live steps are in [`docs/AP4M_CHECKLIST.md`](docs/AP4M_CHECKLIST.md). `pnpm ap4m:check [--env-file path]` is a read-only preflight: it checks the variables, the key format, the AP4M API, the HTTP 402 resource, and the chain id, and never signs or spends.
 
 ## Sponsor progress
 
@@ -64,7 +66,7 @@ pnpm --filter @switchboard/web dev            # :3000
 
 Dev bearer: `switchboard-dev-platform-token`. Sandbox Ed25519 keys under each of `services/markets/dev-keys` and `services/execution/dev-keys` are the same committed development seed. They control no funds. Do not use them outside this sandbox.
 
-`pnpm test` runs the four package test suites. `pnpm test:contracts` checks the frozen fixtures. Foundry: `forge test` in `contracts/solidity`.
+`pnpm test` runs the four package test suites. The execution suite also covers the demo routes (`services/execution/test/demo-app.test.ts`) and the AP4M preflight. `pnpm test:contracts` checks the frozen fixtures. Foundry: `forge test` in `contracts/solidity`.
 
 ## Command to validate the starter
 ```bash

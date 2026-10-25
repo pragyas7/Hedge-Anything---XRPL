@@ -113,7 +113,7 @@ import "ethers";
 import "fastify";
 import "jose";
 
-// server.ts
+// demo/app.ts
 import { randomUUID as randomUUID9 } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { Decimal as Decimal5 } from "decimal.js";
@@ -6109,7 +6109,7 @@ function buildApp3(options = {}) {
   return app;
 }
 
-// server.ts
+// demo/app.ts
 if (Number(process.env.QUOTE_TTL_SECONDS ?? "0") < 900) {
   process.env.QUOTE_TTL_SECONDS = "900";
 }
@@ -6528,6 +6528,8 @@ function messageOf(body, fallback) {
   if (isRecord6(body) && typeof body.message === "string" && body.message.trim()) return body.message;
   return fallback;
 }
+
+// server.ts
 var gateway = await createDemoApp();
 if (!process.env.VERCEL) {
   const port = Number(process.env.PORT ?? 4110);

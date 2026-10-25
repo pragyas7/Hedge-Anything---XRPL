@@ -10,7 +10,8 @@
     "test": "pnpm --filter @switchboard/strategy --filter @switchboard/markets --filter @switchboard/execution --filter @switchboard/web test",
     "typecheck": "pnpm --filter @switchboard/strategy --filter @switchboard/markets --filter @switchboard/execution --filter @switchboard/web typecheck",
     "test:contracts": "python tests/validate_starter.py",
-    "typecheck:contracts": "pnpm --filter @switchboard/contracts typecheck"
+    "typecheck:contracts": "pnpm --filter @switchboard/contracts typecheck",
+    "ap4m:check": "tsx services/execution/src/ap4m-check.ts"
   },
   "dependencies": {
     "canonicalize": "^2.1.0",

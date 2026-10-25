@@ -54,7 +54,7 @@ export function missingAp4mPayment(env: NodeJS.ProcessEnv): string[] {
   return missing;
 }
 
-function amountFrom402(body: unknown): string | undefined {
+export function amountFrom402(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
   const source = body as Record<string, unknown>;
   for (const key of ["amountUsd", "amount", "maxAmountRequired", "value", "price"]) {
