@@ -10,5 +10,23 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+  # In-memory execution service. Does not require postgres or redis to boot.
+  # Strategy and markets images are owned by other agents and are not referenced here.
+  execution:
+    build:
+      context: ..
+      dockerfile: services/execution/Dockerfile
+    ports: ["4103:4103"]
+    environment:
+      PORT: "4103"
+      SWITCHBOARD_DEV_BEARER: switchboard-dev-platform-token
+      MARKETS_BASE_URL: http://host.docker.internal:4102
+      AP4M_MODE: mock
+      LEDGER_MODE: unsupported_until_verified
+      LEDGER_DMK_VERIFIED: "false"
+      EXECUTION_ALLOW_LIVE: "false"
+      XRPL_EVM_CHAIN_ID: "1449000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 volumes:
   sbpg: {}
