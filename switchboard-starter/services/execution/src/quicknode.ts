@@ -14,6 +14,10 @@ export interface SettlementLogReport {
 }
 
 const PAYMENT_LEDGER = "0xcAB42800A5ECF0D253Fa2581Bb3334B4DAEfaE91";
+/** How far back the log read looks, in blocks. */
+const LOG_WINDOW = 20;
+/** QuickNode's free Discover plan rejects eth_getLogs spans wider than 5 blocks, so each request covers at most 5. */
+const LOG_CHUNK = 5;
 
 function hostOf(rpcUrl: string): string {
   try {
@@ -68,36 +72,42 @@ export async function readPaymentLedgerLogs(
       throw new Error(head.error?.message || `RPC HTTP ${headResponse.status}`);
     }
     const toBlock = Number.parseInt(head.result, 16);
-    const fromBlock = Math.max(0, toBlock - 20);
-    const logsResponse = await fetchImpl(rpc.url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: AbortSignal.timeout(4000),
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "eth_getLogs",
-        params: [{
-          address: contract,
-          fromBlock: `0x${fromBlock.toString(16)}`,
-          toBlock: `0x${toBlock.toString(16)}`,
-          topics: [topic],
-        }],
-      }),
-    });
-    const logsBody = await logsResponse.json() as { result?: unknown; error?: { message?: string } };
-    if (!logsResponse.ok || !Array.isArray(logsBody.result)) {
-      throw new Error(logsBody.error?.message || `eth_getLogs HTTP ${logsResponse.status}`);
+    const fromBlock = Math.max(0, toBlock - LOG_WINDOW);
+    const ranges: Array<[number, number]> = [];
+    for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK) {
+      ranges.push([start, Math.min(start + LOG_CHUNK - 1, toBlock)]);
     }
-    const newest = logsBody.result.length > 0
-      ? logsBody.result[logsBody.result.length - 1] as { transactionHash?: unknown }
-      : undefined;
+    const chunks = await Promise.all(ranges.map(async ([start, end], index) => {
+      const logsResponse = await fetchImpl(rpc.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(4000),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2 + index,
+          method: "eth_getLogs",
+          params: [{
+            address: contract,
+            fromBlock: `0x${start.toString(16)}`,
+            toBlock: `0x${end.toString(16)}`,
+            topics: [topic],
+          }],
+        }),
+      });
+      const logsBody = await logsResponse.json() as { result?: unknown; error?: { message?: string } };
+      if (!logsResponse.ok || !Array.isArray(logsBody.result)) {
+        throw new Error(logsBody.error?.message || `eth_getLogs HTTP ${logsResponse.status}`);
+      }
+      return logsBody.result as Array<{ transactionHash?: unknown }>;
+    }));
+    const logs = chunks.flat();
+    const newest = logs.length > 0 ? logs[logs.length - 1] : undefined;
     return {
       ...base,
       ok: true,
       fromBlock,
       toBlock,
-      eventCount: logsBody.result.length,
+      eventCount: logs.length,
       newestTransactionHash: typeof newest?.transactionHash === "string" ? newest.transactionHash : null,
     };
   } catch (error) {

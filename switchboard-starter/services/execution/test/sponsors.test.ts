@@ -129,6 +129,30 @@ describe("PaymentLedger log topic", () => {
     expect(report.eventCount).toBe(0);
     expect(report.newestTransactionHash).toBeNull();
   });
+
+  it("keeps every eth_getLogs span within QuickNode's 5-block free-plan limit", async () => {
+    const spans: Array<[number, number]> = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { method: string; params?: [{ fromBlock: string; toBlock: string }] };
+      if (body.method === "eth_blockNumber") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x64" }), { status: 200 });
+      }
+      const from = Number.parseInt(body.params![0].fromBlock, 16);
+      const to = Number.parseInt(body.params![0].toBlock, 16);
+      spans.push([from, to]);
+      const result = from <= 0x60 && 0x60 <= to ? [{ transactionHash: `0x${"cd".repeat(32)}` }] : [];
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 2, result }), { status: 200 });
+    };
+    const report = await readPaymentLedgerLogs({ QUICKNODE_RPC_URL: "https://example.quiknode.pro/token/" }, fetchImpl);
+    expect(report.ok).toBe(true);
+    expect(report.fromBlock).toBe(80);
+    expect(report.toBlock).toBe(100);
+    expect(spans.every(([from, to]) => to - from + 1 <= 5)).toBe(true);
+    const covered = spans.flatMap(([from, to]) => Array.from({ length: to - from + 1 }, (_, i) => from + i)).sort((a, b) => a - b);
+    expect(covered).toEqual(Array.from({ length: 21 }, (_, i) => 80 + i));
+    expect(report.eventCount).toBe(1);
+    expect(report.newestTransactionHash).toBe(`0x${"cd".repeat(32)}`);
+  });
 });
 
 describe("AWS AgentCore stand-in", () => {

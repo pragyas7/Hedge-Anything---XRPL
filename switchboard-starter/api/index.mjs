@@ -2107,6 +2107,8 @@ async function ledgerDeviceStatus() {
 // services/execution/src/quicknode.ts
 init_ap4m_chain();
 var PAYMENT_LEDGER = "0xcAB42800A5ECF0D253Fa2581Bb3334B4DAEfaE91";
+var LOG_WINDOW = 20;
+var LOG_CHUNK = 5;
 function hostOf2(rpcUrl) {
   try {
     return new URL(rpcUrl).host;
@@ -2150,34 +2152,42 @@ async function readPaymentLedgerLogs(env = process.env, fetchImpl = fetch, topic
       throw new Error(head.error?.message || `RPC HTTP ${headResponse.status}`);
     }
     const toBlock = Number.parseInt(head.result, 16);
-    const fromBlock = Math.max(0, toBlock - 20);
-    const logsResponse = await fetchImpl(rpc2.url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: AbortSignal.timeout(4e3),
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "eth_getLogs",
-        params: [{
-          address: contract,
-          fromBlock: `0x${fromBlock.toString(16)}`,
-          toBlock: `0x${toBlock.toString(16)}`,
-          topics: [topic]
-        }]
-      })
-    });
-    const logsBody = await logsResponse.json();
-    if (!logsResponse.ok || !Array.isArray(logsBody.result)) {
-      throw new Error(logsBody.error?.message || `eth_getLogs HTTP ${logsResponse.status}`);
+    const fromBlock = Math.max(0, toBlock - LOG_WINDOW);
+    const ranges = [];
+    for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK) {
+      ranges.push([start, Math.min(start + LOG_CHUNK - 1, toBlock)]);
     }
-    const newest = logsBody.result.length > 0 ? logsBody.result[logsBody.result.length - 1] : void 0;
+    const chunks = await Promise.all(ranges.map(async ([start, end], index) => {
+      const logsResponse = await fetchImpl(rpc2.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(4e3),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2 + index,
+          method: "eth_getLogs",
+          params: [{
+            address: contract,
+            fromBlock: `0x${start.toString(16)}`,
+            toBlock: `0x${end.toString(16)}`,
+            topics: [topic]
+          }]
+        })
+      });
+      const logsBody = await logsResponse.json();
+      if (!logsResponse.ok || !Array.isArray(logsBody.result)) {
+        throw new Error(logsBody.error?.message || `eth_getLogs HTTP ${logsResponse.status}`);
+      }
+      return logsBody.result;
+    }));
+    const logs = chunks.flat();
+    const newest = logs.length > 0 ? logs[logs.length - 1] : void 0;
     return {
       ...base,
       ok: true,
       fromBlock,
       toBlock,
-      eventCount: logsBody.result.length,
+      eventCount: logs.length,
       newestTransactionHash: typeof newest?.transactionHash === "string" ? newest.transactionHash : null
     };
   } catch (error) {
