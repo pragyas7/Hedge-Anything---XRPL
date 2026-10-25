@@ -451,8 +451,11 @@ export function generatePlan(request: GenerateStrategyRequest, now: Date, solver
     const fraction = comparison === 'proxy' ? PROXY_BASIS_SHORTFALL : new Decimal(0);
     const payoffPerUnit = company.scenarios.map((scenario) => grossPayoffPerUnit(quote, scenario).times(new Decimal(1).minus(fraction)));
     const unitCost = unitAllIn(quote);
+    // All-in cost is the price of requestedQuantity, not a license to scale past that size.
+    const quotedSize = dec(quote.requestedQuantity).floor();
     const affordable = Decimal.min(
       dec(quote.availableQuantity).floor(),
+      quotedSize.gt(0) ? quotedSize : new Decimal(0),
       unitCost.gt(0) ? budget.div(unitCost).floor() : new Decimal(0),
       new Decimal(MAX_QTY_PER_LEG),
     );

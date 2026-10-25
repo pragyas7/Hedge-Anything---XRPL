@@ -29,6 +29,21 @@ Describe a company → confirm exposures and risk budget → aggregate comparabl
 ## Safety and regulatory posture
 **No live US derivatives exchange, live unregistered derivatives matching, or automatic real-money trading is authorized by this repo.** Exchange order book and RFQ are testnet/paper modes until regulatory counsel and a licensed venue/clearing structure authorize deployment. Connectors enforce geographic/account/market eligibility. Polymarket International is read-only for US users. Ledger Agent Intent beta lacks XRPL EVM transaction support; treat Ledger hardware-signing integration as a separate, verified capability instead of inventing compatibility.
 
+## Local stack
+Node 20 and pnpm 9. From this directory:
+
+```bash
+pnpm install
+pnpm --filter @switchboard/markets start      # :4102
+pnpm --filter @switchboard/execution start    # :4103
+pnpm --filter @switchboard/strategy start     # :4101
+pnpm --filter @switchboard/web dev            # :3000
+```
+
+Dev bearer: `switchboard-dev-platform-token`. Sandbox Ed25519 keys under each of `services/markets/dev-keys` and `services/execution/dev-keys` are the same committed development seed. They control no funds. Do not use them outside this sandbox.
+
+`pnpm test` runs the four package test suites. `pnpm test:contracts` checks the frozen fixtures. Foundry: `forge test` in `contracts/solidity`.
+
 ## Command to validate the starter
 ```bash
 python tests/validate_starter.py

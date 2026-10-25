@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "test": "pnpm --filter @switchboard/strategy --filter @switchboard/markets --filter @switchboard/execution --filter @switchboard/web test",
+    "typecheck": "pnpm --filter @switchboard/strategy --filter @switchboard/markets --filter @switchboard/execution --filter @switchboard/web typecheck",
     "test:contracts": "python tests/validate_starter.py",
     "typecheck:contracts": "pnpm --filter @switchboard/contracts typecheck"
   }

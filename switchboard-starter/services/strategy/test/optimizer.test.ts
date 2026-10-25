@@ -50,6 +50,17 @@ describe('optimizer', () => {
     expect(dec(plans[1]!.estimatedTotalCostUsd).lt(dec(plans[0]!.estimatedTotalCostUsd))).toBe(true);
   });
 
+  it('does not buy more than the size the quote was priced for', () => {
+    const market = loadMarketSearch();
+    const plan = generatePlan(request('min_cvar', market), AS_OF);
+    for (const leg of plan.legs) {
+      const quote = market.quotes.find((item) => item.quoteId === leg.quoteId);
+      expect(quote).toBeTruthy();
+      expect(dec(leg.quantity).lte(dec(quote!.requestedQuantity))).toBe(true);
+      expect(dec(leg.quantity).lte(dec(quote!.availableQuantity))).toBe(true);
+    }
+  });
+
   it('returns NO_ACTION when every quote is expired', () => {
     const market = loadMarketSearch();
     market.quotes[0]!.expiresAt = '2020-01-01T00:00:00Z';
