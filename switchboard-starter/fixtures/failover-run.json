@@ -1,0 +1,11 @@
+{
+  "failoverId": "failover_demo_001",
+  "planId": "plan_sandbox_001",
+  "primaryService": "https://primary.example.invalid/infer",
+  "fallbackService": "https://fallback.example.invalid/infer",
+  "state": "HEALTHY",
+  "ap4mSpendingUsd": "0",
+  "receipts": [],
+  "correlationId": "corr_demo_001",
+  "errors": []
+}

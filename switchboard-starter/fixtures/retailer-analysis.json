@@ -1,0 +1,73 @@
+{
+  "company": {
+    "companyId": "co_retail_demo",
+    "name": "Demo Coastal Retailer (fictional)",
+    "description": "Fictional retail operator vulnerable to storm-related delivery and venue closure",
+    "jurisdiction": "US",
+    "baseCurrency": "USD",
+    "monthlyHedgeBudgetUsd": "1200",
+    "maxTolerableTailLossUsd": "18000",
+    "cvarAlpha": 0.95,
+    "exposures": [
+      {
+        "exposureId": "exp_storm",
+        "category": "climate",
+        "label": "Coastal storm logistics interruption",
+        "description": "Lost retail sales and late delivery if warehouse/logistics shuts down",
+        "riskFactors": [
+          "storm_severity",
+          "shipping_delay"
+        ],
+        "horizonDays": 60,
+        "scenarioIds": [
+          "storm_normal",
+          "storm_delay",
+          "storm_severe"
+        ],
+        "confidence": 0.5
+      }
+    ],
+    "scenarios": [
+      {
+        "scenarioId": "storm_normal",
+        "label": "No significant storm",
+        "probability": 0.85,
+        "baselineLossUsd": "0",
+        "factorShocks": {
+          "storm_severity": 0,
+          "shipping_delay": 0
+        },
+        "source": "synthetic"
+      },
+      {
+        "scenarioId": "storm_delay",
+        "label": "Minor storm logistics delay",
+        "probability": 0.1,
+        "baselineLossUsd": "8000",
+        "factorShocks": {
+          "storm_severity": 1,
+          "shipping_delay": 1
+        },
+        "source": "synthetic"
+      },
+      {
+        "scenarioId": "storm_severe",
+        "label": "Severe storm warehouse outage",
+        "probability": 0.05,
+        "baselineLossUsd": "40000",
+        "factorShocks": {
+          "storm_severity": 3,
+          "shipping_delay": 3
+        },
+        "source": "synthetic"
+      }
+    ],
+    "confirmedByUser": true
+  },
+  "assumptions": [
+    "Illustrative retailer; scenario losses and frequencies require user validation."
+  ],
+  "warnings": [
+    "Current amounts are not actuarially calibrated or derived from live market prices."
+  ]
+}

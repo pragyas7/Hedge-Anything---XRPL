@@ -1,0 +1,2022 @@
+openapi: 3.1.0
+info:
+  title: Switchboard Service API
+  version: 1.0.0
+  description: 'Frozen shared API. Service ownership: A Strategy, B Markets, C Execution. Sandbox/testnet by default. No unauthenticated
+    live trading.'
+servers:
+- url: http://localhost:4101
+  description: Agent A Strategy; other services at 4102/4103
+tags:
+- name: Strategy
+- name: Markets
+- name: Execution
+paths:
+  /v1/companies/analyze:
+    post:
+      tags:
+      - Strategy
+      summary: Parse and structure exposure candidates; user must confirm assumptions
+      operationId: strategy1
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanyAnalyzeRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyAnalysisResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/strategies/generate:
+    post:
+      tags:
+      - Strategy
+      summary: Minimize severe downside risk subject to budget, expiry, eligibility and liquidity
+      operationId: strategy2
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateStrategyRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HedgePlan'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/markets/search:
+    post:
+      tags:
+      - Markets
+      summary: Discover normalized opportunities and objectively measured basis risk
+      operationId: markets3
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketSearchRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketSearchResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/markets/orders:
+    post:
+      tags:
+      - Markets
+      summary: Place approved venue order or sandbox trade; never circumvent eligibility
+      operationId: markets4
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-Execution-Authorization
+        in: header
+        required: true
+        description: Signed short-lived scoped authorization issued by Agent C, or distinct approved maker-order role on sandbox
+          exchange. B MUST cryptographically validate issuer, audience, quote, amount, venue, nonce and expiry.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketOrderRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketOrderResult'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/exchange/rfqs:
+    post:
+      tags:
+      - Markets
+      summary: Open bounded contract RFQ (sandbox)
+      operationId: markets5
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RfqRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfqRequest'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/exchange/rfqs/{rfqId}/quotes:
+    post:
+      tags:
+      - Markets
+      summary: Publish firm RFQ quote before expiration
+      operationId: markets6
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: rfqId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RfqQuote'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfqQuote'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/exchange/rfqs/{rfqId}/accept:
+    post:
+      tags:
+      - Markets
+      summary: Accept firm collateralized RFQ under plan approval
+      operationId: markets7
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: rfqId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Execution-Authorization
+        in: header
+        required: true
+        description: Signed short-lived scoped authorization issued by Agent C, or distinct approved maker-order role on sandbox
+          exchange. B MUST cryptographically validate issuer, audience, quote, amount, venue, nonce and expiry.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RfqAcceptRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfqQuote'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/exchange/orders:
+    post:
+      tags:
+      - Markets
+      summary: Submit sandbox exchange limit order
+      operationId: markets8
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-Execution-Authorization
+        in: header
+        required: true
+        description: Signed short-lived scoped authorization issued by Agent C, or distinct approved maker-order role on sandbox
+          exchange. B MUST cryptographically validate issuer, audience, quote, amount, venue, nonce and expiry.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeOrder'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketOrderResult'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/exchange/orderbook/{instrumentId}:
+    get:
+      tags:
+      - Markets
+      summary: Get normalized price-time orderbook
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeOrderbook'
+      parameters:
+      - name: instrumentId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+  /v1/execution/approvals:
+    post:
+      tags:
+      - Execution
+      summary: Create immutable pending approval request
+      operationId: execution10
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/execution/approvals/{approvalId}/confirm:
+    post:
+      tags:
+      - Execution
+      summary: Verify real approval evidence and capability
+      operationId: execution11
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: approvalId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalConfirmRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/execution/runs:
+    post:
+      tags:
+      - Execution
+      summary: Execute only previously approved plan, idempotently
+      operationId: execution12
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionRunRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionRun'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /v1/execution/runs/{runId}:
+    get:
+      tags:
+      - Execution
+      summary: Read execution run status
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionRun'
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+  /v1/failover/simulate:
+    post:
+      tags:
+      - Execution
+      summary: Inject service failure and orchestrate testnet fallback
+      operationId: execution14
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailoverSimulateRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailoverRun'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not eligible / not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale/reapproval/conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+      security:
+      - BearerAuth: []
+  /healthz:
+    get:
+      tags:
+      - Strategy
+      - Markets
+      - Execution
+      summary: Each service independently serves this health endpoint at its own host/port
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                  version:
+                    type: string
+                required:
+                - status
+                - service
+                - version
+  /v1/companies/{companyId}:
+    get:
+      tags:
+      - Strategy
+      summary: Fetch confirmed company risk profile
+      parameters:
+      - name: companyId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyAnalysisResponse'
+        '404':
+          description: Not found
+  /v1/strategies/{planId}:
+    get:
+      tags:
+      - Strategy
+      summary: Fetch immutable versioned hedge plan
+      parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HedgePlan'
+        '404':
+          description: Not found
+  /v1/markets/instruments/{instrumentId}:
+    get:
+      tags:
+      - Markets
+      summary: Fetch exact venue contract terms
+      parameters:
+      - name: instrumentId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Instrument'
+        '404':
+          description: Not found
+  /v1/exchange/instruments:
+    get:
+      tags:
+      - Markets
+      summary: List native exchange instruments
+      parameters: []
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstrumentList'
+        '404':
+          description: Not found
+  /v1/exchange/rfqs/{rfqId}:
+    get:
+      tags:
+      - Markets
+      summary: Read RFQ terms
+      parameters:
+      - name: rfqId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RfqRequest'
+        '404':
+          description: Not found
+  /v1/failover/runs/{failoverId}:
+    get:
+      tags:
+      - Execution
+      summary: Read failover state, budget and payment receipts
+      parameters:
+      - name: failoverId
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailoverRun'
+        '404':
+          description: Not found
+  /v1/failover/arm:
+    post:
+      tags:
+      - Execution
+      summary: Arm monitored, approved policy-bound fallback
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailoverArmRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailoverArmResponse'
+  /v1/failover/disable:
+    post:
+      tags:
+      - Execution
+      summary: Disable fallback monitoring immediately
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailoverDisableRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailoverArmResponse'
+components:
+  schemas:
+    Scenario:
+      type: object
+      properties:
+        scenarioId:
+          type: string
+        label:
+          type: string
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+        baselineLossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        factorShocks:
+          type: object
+          additionalProperties:
+            type: number
+        source:
+          type: string
+          enum:
+          - synthetic
+          - historical
+          - user_supplied
+      required:
+      - scenarioId
+      - label
+      - probability
+      - baselineLossUsd
+      - factorShocks
+      - source
+      additionalProperties: false
+    RiskExposure:
+      type: object
+      properties:
+        exposureId:
+          type: string
+        category:
+          type: string
+          enum:
+          - operational
+          - digital
+          - climate
+          - commodity
+          - supply_chain
+          - regulatory
+          - financial
+          - other
+        label:
+          type: string
+        description:
+          type: string
+        riskFactors:
+          type: array
+          items:
+            type: string
+        horizonDays:
+          type: integer
+          minimum: 1
+        scenarioIds:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+      required:
+      - exposureId
+      - category
+      - label
+      - description
+      - riskFactors
+      - horizonDays
+      - scenarioIds
+      - confidence
+      additionalProperties: false
+    CompanyProfile:
+      type: object
+      properties:
+        companyId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        jurisdiction:
+          type: string
+        baseCurrency:
+          type: string
+          enum:
+          - USD
+        monthlyHedgeBudgetUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maxTolerableTailLossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        cvarAlpha:
+          type: number
+          minimum: 0.5
+          maximum: 0.999
+        exposures:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskExposure'
+        scenarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Scenario'
+        confirmedByUser:
+          type: boolean
+      required:
+      - companyId
+      - name
+      - description
+      - jurisdiction
+      - baseCurrency
+      - monthlyHedgeBudgetUsd
+      - maxTolerableTailLossUsd
+      - cvarAlpha
+      - exposures
+      - scenarios
+      - confirmedByUser
+      additionalProperties: false
+    CompanyAnalyzeRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        jurisdiction:
+          type: string
+        monthlyHedgeBudgetUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maxTolerableTailLossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+      required:
+      - description
+      - jurisdiction
+      - monthlyHedgeBudgetUsd
+      - maxTolerableTailLossUsd
+      additionalProperties: false
+    CompanyAnalysisResponse:
+      type: object
+      properties:
+        company:
+          $ref: '#/components/schemas/CompanyProfile'
+        assumptions:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+      required:
+      - company
+      - assumptions
+      - warnings
+      additionalProperties: false
+    Instrument:
+      type: object
+      properties:
+        instrumentId:
+          type: string
+        venue:
+          type: string
+          enum:
+          - kalshi
+          - polymarket_us
+          - polymarket_international
+          - switchboard
+          - capacity_provider
+        name:
+          type: string
+        riskFactor:
+          type: string
+        settlementType:
+          type: string
+          enum:
+          - binary
+          - capped_call
+          - capacity_option
+        eventRule:
+          type: string
+        resolutionSourceUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        payoutPerUnitUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maximumPayoutUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        collateralCurrency:
+          type: string
+        unitDescription:
+          type: string
+        comparisonGroupId:
+          type: string
+      required:
+      - instrumentId
+      - venue
+      - name
+      - riskFactor
+      - settlementType
+      - eventRule
+      - resolutionSourceUrl
+      - expiresAt
+      - payoutPerUnitUsd
+      - maximumPayoutUsd
+      - collateralCurrency
+      - unitDescription
+      additionalProperties: false
+    FeeBreakdown:
+      type: object
+      properties:
+        tradingFeeUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        networkFeeUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        conversionFeeUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        modeledSlippageUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        otherFeeUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+      required:
+      - tradingFeeUsd
+      - networkFeeUsd
+      - conversionFeeUsd
+      - modeledSlippageUsd
+      - otherFeeUsd
+      additionalProperties: false
+    MarketQuote:
+      type: object
+      properties:
+        quoteId:
+          type: string
+        instrument:
+          $ref: '#/components/schemas/Instrument'
+        venue:
+          type: string
+          enum:
+          - kalshi
+          - polymarket_us
+          - polymarket_international
+          - switchboard
+          - capacity_provider
+        capability:
+          type: string
+          enum:
+          - live
+          - sandbox
+          - read_only
+          - unsupported
+        comparison:
+          type: string
+          enum:
+          - direct
+          - proxy
+          - not_comparable
+        eligibilityReason:
+          type: string
+        bidUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        askUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        requestedQuantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        availableQuantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        estimatedAllInBuyCostUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        fees:
+          $ref: '#/components/schemas/FeeBreakdown'
+        quotedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+          - live
+          - synthetic
+          - sandbox
+        basisRiskDescription:
+          type: string
+      required:
+      - quoteId
+      - instrument
+      - venue
+      - capability
+      - comparison
+      - eligibilityReason
+      - bidUsd
+      - askUsd
+      - requestedQuantity
+      - availableQuantity
+      - estimatedAllInBuyCostUsd
+      - fees
+      - quotedAt
+      - expiresAt
+      - source
+      - basisRiskDescription
+      additionalProperties: false
+    CapacityOffer:
+      type: object
+      properties:
+        offerId:
+          type: string
+        providerName:
+          type: string
+        qualifiedTask:
+          type: string
+        region:
+          type: string
+        throughputPerSecond:
+          type: number
+          minimum: 0
+        guaranteedPricePerRequestUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        reservationPremiumUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        reservedUntil:
+          type: string
+          format: date-time
+        verifiedCapacity:
+          type: boolean
+        qualificationBenchmark:
+          type: string
+        capability:
+          type: string
+          enum:
+          - live
+          - sandbox
+          - read_only
+          - unsupported
+      required:
+      - offerId
+      - providerName
+      - qualifiedTask
+      - region
+      - throughputPerSecond
+      - guaranteedPricePerRequestUsd
+      - reservationPremiumUsd
+      - reservedUntil
+      - verifiedCapacity
+      - qualificationBenchmark
+      - capability
+      additionalProperties: false
+    MarketSearchRequest:
+      type: object
+      properties:
+        companyId:
+          type: string
+        exposureIds:
+          type: array
+          items:
+            type: string
+        requestedQuantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        jurisdiction:
+          type: string
+        includeReferenceMarkets:
+          type: boolean
+      required:
+      - companyId
+      - exposureIds
+      - requestedQuantity
+      - jurisdiction
+      - includeReferenceMarkets
+      additionalProperties: false
+    MarketSearchResponse:
+      type: object
+      properties:
+        companyId:
+          type: string
+        quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketQuote'
+        capacityOffers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapacityOffer'
+        retrievedAt:
+          type: string
+          format: date-time
+        warnings:
+          type: array
+          items:
+            type: string
+      required:
+      - companyId
+      - quotes
+      - capacityOffers
+      - retrievedAt
+      - warnings
+      additionalProperties: false
+    TailRiskMetrics:
+      type: object
+      properties:
+        expectedLossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        p95LossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        cvar95LossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        worstScenarioLossUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+      required:
+      - expectedLossUsd
+      - p95LossUsd
+      - cvar95LossUsd
+      - worstScenarioLossUsd
+      additionalProperties: false
+    HedgeLeg:
+      type: object
+      properties:
+        legId:
+          type: string
+        kind:
+          type: string
+          enum:
+          - financial
+          - capacity
+        quoteId:
+          type: string
+        instrumentId:
+          type: string
+        capacityOfferId:
+          type: string
+        venue:
+          type: string
+          enum:
+          - kalshi
+          - polymarket_us
+          - polymarket_international
+          - switchboard
+          - capacity_provider
+        quantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        estimatedAllInCostUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maxAdditionalObligationUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        payoffByScenarioUsd:
+          type: object
+          additionalProperties:
+            type: string
+            pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+            description: Base USD amount encoded as a decimal string
+        basisRisk:
+          type: string
+      required:
+      - legId
+      - kind
+      - venue
+      - quantity
+      - estimatedAllInCostUsd
+      - maxAdditionalObligationUsd
+      - payoffByScenarioUsd
+      - basisRisk
+      additionalProperties: false
+    HedgePlan:
+      type: object
+      properties:
+        planId:
+          type: string
+        companyId:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - QUOTED
+          - PENDING_APPROVAL
+          - APPROVED
+          - EXECUTING
+          - ACTIVE
+          - REAPPROVAL_REQUIRED
+          - REJECTED
+          - EXPIRED
+          - PARTIALLY_EXECUTED
+          - FAILED
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        planHash:
+          type: string
+        budgetUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        estimatedTotalCostUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        before:
+          $ref: '#/components/schemas/TailRiskMetrics'
+        after:
+          $ref: '#/components/schemas/TailRiskMetrics'
+        legs:
+          type: array
+          items:
+            $ref: '#/components/schemas/HedgeLeg'
+        rationale:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        syntheticDemo:
+          type: boolean
+      required:
+      - planId
+      - companyId
+      - version
+      - status
+      - createdAt
+      - expiresAt
+      - planHash
+      - budgetUsd
+      - estimatedTotalCostUsd
+      - before
+      - after
+      - legs
+      - rationale
+      - warnings
+      - syntheticDemo
+      additionalProperties: false
+    GenerateStrategyRequest:
+      type: object
+      properties:
+        company:
+          $ref: '#/components/schemas/CompanyProfile'
+        marketSearch:
+          $ref: '#/components/schemas/MarketSearchResponse'
+        mode:
+          type: string
+          enum:
+          - min_cvar
+          - min_cost
+          - balanced
+      required:
+      - company
+      - marketSearch
+      - mode
+      additionalProperties: false
+    ApprovalRequest:
+      type: object
+      properties:
+        planId:
+          type: string
+        planHash:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        maxTotalSpendUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maxCollateralUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        allowedVenues:
+          type: array
+          items:
+            type: string
+            enum:
+            - kalshi
+            - polymarket_us
+            - polymarket_international
+            - switchboard
+            - capacity_provider
+        ap4mFallbackBudgetUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+      required:
+      - planId
+      - planHash
+      - expiresAt
+      - maxTotalSpendUsd
+      - maxCollateralUsd
+      - allowedVenues
+      - ap4mFallbackBudgetUsd
+      additionalProperties: false
+    Approval:
+      type: object
+      properties:
+        approvalId:
+          type: string
+        request:
+          $ref: '#/components/schemas/ApprovalRequest'
+        status:
+          type: string
+          enum:
+          - PENDING
+          - APPROVED
+          - REJECTED
+          - EXPIRED
+          - UNSUPPORTED
+        method:
+          type: string
+          enum:
+          - app_manual
+          - ledger_agent_intent
+          - ledger_dmk_verified
+          - external_wallet
+        deviceProofId:
+          type: string
+        approvedAt:
+          type: string
+          format: date-time
+      required:
+      - approvalId
+      - request
+      - status
+      - method
+      additionalProperties: false
+    ApprovalConfirmRequest:
+      type: object
+      properties:
+        method:
+          type: string
+          enum:
+          - app_manual
+          - ledger_agent_intent
+          - ledger_dmk_verified
+          - external_wallet
+        signedIntent:
+          type: string
+        deviceProofId:
+          type: string
+      required:
+      - method
+      - signedIntent
+      additionalProperties: false
+    MarketOrderRequest:
+      type: object
+      properties:
+        approvalId:
+          type: string
+        planHash:
+          type: string
+        quoteId:
+          type: string
+        side:
+          type: string
+          enum:
+          - BUY
+          - SELL
+        quantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        limitPriceUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        clientOrderId:
+          type: string
+      required:
+      - approvalId
+      - planHash
+      - quoteId
+      - side
+      - quantity
+      - limitPriceUsd
+      - clientOrderId
+      additionalProperties: false
+    MarketOrderResult:
+      type: object
+      properties:
+        clientOrderId:
+          type: string
+        venueOrderId:
+          type: string
+        status:
+          type: string
+          enum:
+          - CREATED
+          - ACCEPTED
+          - PARTIALLY_FILLED
+          - FILLED
+          - REJECTED
+          - CANCELLED
+          - EXPIRED
+          - SIMULATED
+        filledQuantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        averageFillPriceUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        txHash:
+          type: string
+        syntheticDemo:
+          type: boolean
+      required:
+      - clientOrderId
+      - venueOrderId
+      - status
+      - filledQuantity
+      - averageFillPriceUsd
+      - syntheticDemo
+      additionalProperties: false
+    SettlementReceipt:
+      type: object
+      properties:
+        receiptId:
+          type: string
+        kind:
+          type: string
+          enum:
+          - market_fill
+          - voucher_redeemed
+          - rlusd_settlement
+          - service_unlocked
+          - exchange_settlement
+        chainId:
+          type: integer
+        transactionHash:
+          type: string
+        confirmed:
+          type: boolean
+        observedAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+      - receiptId
+      - kind
+      - confirmed
+      - observedAt
+      - metadata
+      additionalProperties: false
+    ExecutionRunRequest:
+      type: object
+      properties:
+        plan:
+          $ref: '#/components/schemas/HedgePlan'
+        approvalId:
+          type: string
+        idempotencyKey:
+          type: string
+      required:
+      - plan
+      - approvalId
+      - idempotencyKey
+      additionalProperties: false
+    ExecutionRun:
+      type: object
+      properties:
+        runId:
+          type: string
+        planId:
+          type: string
+        approvalId:
+          type: string
+        status:
+          type: string
+          enum:
+          - PENDING
+          - EXECUTING
+          - PARTIAL
+          - ACTIVE
+          - FAILED
+          - REAPPROVAL_REQUIRED
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketOrderResult'
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettlementReceipt'
+        correlationId:
+          type: string
+      required:
+      - runId
+      - planId
+      - approvalId
+      - status
+      - orders
+      - receipts
+      - correlationId
+      additionalProperties: false
+    FailoverSimulateRequest:
+      type: object
+      properties:
+        planId:
+          type: string
+        primaryService:
+          type: string
+        fallbackService:
+          type: string
+        failureMode:
+          type: string
+          enum:
+          - timeout
+          - http_500
+          - latency_spike
+          - provider_down
+      required:
+      - planId
+      - primaryService
+      - fallbackService
+      - failureMode
+      additionalProperties: false
+    FailoverRun:
+      type: object
+      properties:
+        failoverId:
+          type: string
+        planId:
+          type: string
+        primaryService:
+          type: string
+        fallbackService:
+          type: string
+        state:
+          type: string
+          enum:
+          - HEALTHY
+          - SUSPECT
+          - VERIFIED_FAILURE
+          - SEARCHING_FALLBACK
+          - QUOTED_402
+          - VOUCHER_SIGNED
+          - VOUCHER_REDEEMED
+          - RLUSD_SETTLED
+          - FALLBACK_ACTIVE
+          - BUDGET_BLOCKED
+          - UNAVAILABLE
+          - UNVERIFIED
+          - FAIL_CLOSED
+        ap4mSpendingUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettlementReceipt'
+        correlationId:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+      required:
+      - failoverId
+      - planId
+      - primaryService
+      - fallbackService
+      - state
+      - ap4mSpendingUsd
+      - receipts
+      - correlationId
+      - errors
+      additionalProperties: false
+    RfqRequest:
+      type: object
+      properties:
+        rfqId:
+          type: string
+        instrumentType:
+          type: string
+          enum:
+          - binary
+          - capped_call
+          - capacity_option
+        canonicalTermsHash:
+          type: string
+        desiredQuantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        expiresAt:
+          type: string
+          format: date-time
+        approvedJurisdiction:
+          type: string
+      required:
+      - instrumentType
+      - canonicalTermsHash
+      - desiredQuantity
+      - expiresAt
+      - approvedJurisdiction
+      additionalProperties: false
+    RfqQuote:
+      type: object
+      properties:
+        rfqId:
+          type: string
+        rfqQuoteId:
+          type: string
+        makerId:
+          type: string
+        premiumUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        maxPayoutUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        firmUntil:
+          type: string
+          format: date-time
+        collateralReserved:
+          type: boolean
+      required:
+      - rfqId
+      - rfqQuoteId
+      - makerId
+      - premiumUsd
+      - maxPayoutUsd
+      - firmUntil
+      - collateralReserved
+      additionalProperties: false
+    RfqAcceptRequest:
+      type: object
+      properties:
+        rfqQuoteId:
+          type: string
+        approvalId:
+          type: string
+        planHash:
+          type: string
+        idempotencyKey:
+          type: string
+      required:
+      - rfqQuoteId
+      - approvalId
+      - planHash
+      - idempotencyKey
+      additionalProperties: false
+    ExchangeOrder:
+      type: object
+      properties:
+        instrumentId:
+          type: string
+        side:
+          type: string
+          enum:
+          - BUY
+          - SELL
+        priceUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        quantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        nonce:
+          type: string
+        goodTil:
+          type: string
+          format: date-time
+        clientOrderId:
+          type: string
+      required:
+      - instrumentId
+      - side
+      - priceUsd
+      - quantity
+      - nonce
+      - goodTil
+      - clientOrderId
+      additionalProperties: false
+    OrderbookLevel:
+      type: object
+      properties:
+        priceUsd:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+        quantity:
+          type: string
+          pattern: ^-?[0-9]+(?:\.[0-9]+)?$
+          description: Base USD amount encoded as a decimal string
+      required:
+      - priceUsd
+      - quantity
+      additionalProperties: false
+    ExchangeOrderbook:
+      type: object
+      properties:
+        instrumentId:
+          type: string
+        bids:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderbookLevel'
+        asks:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderbookLevel'
+        updatedAt:
+          type: string
+          format: date-time
+        mode:
+          type: string
+          enum:
+          - sandbox
+          - live
+      required:
+      - instrumentId
+      - bids
+      - asks
+      - updatedAt
+      - mode
+      additionalProperties: false
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: {}
+      required:
+      - code
+      - message
+      - correlationId
+      - retryable
+      additionalProperties: false
+    InstrumentList:
+      type: object
+      properties:
+        instruments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Instrument'
+        retrievedAt:
+          type: string
+          format: date-time
+        mode:
+          type: string
+          enum:
+          - sandbox
+          - live
+      required:
+      - instruments
+      - retrievedAt
+      - mode
+      additionalProperties: false
+    FailoverArmRequest:
+      type: object
+      properties:
+        planId:
+          type: string
+        approvalId:
+          type: string
+        primaryService:
+          type: string
+        fallbackOfferId:
+          type: string
+        maxPerTriggerUsd:
+          type: string
+        maxDailySpendUsd:
+          type: string
+        triggerRuleId:
+          type: string
+      required:
+      - planId
+      - approvalId
+      - primaryService
+      - fallbackOfferId
+      - maxPerTriggerUsd
+      - maxDailySpendUsd
+      - triggerRuleId
+      additionalProperties: false
+    FailoverArmResponse:
+      type: object
+      properties:
+        monitorId:
+          type: string
+        status:
+          type: string
+          enum:
+          - ARMED
+          - DISABLED
+          - REJECTED
+        policyDigest:
+          type: string
+      required:
+      - monitorId
+      - status
+      - policyDigest
+      additionalProperties: false
+    FailoverDisableRequest:
+      type: object
+      properties:
+        monitorId:
+          type: string
+        reason:
+          type: string
+      required:
+      - monitorId
+      - reason
+      additionalProperties: false
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Platform user auth token for UI, scoped service auth token for inter-service calls

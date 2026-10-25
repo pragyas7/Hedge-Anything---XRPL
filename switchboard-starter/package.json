@@ -1,0 +1,10 @@
+{
+  "name": "switchboard",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "test:contracts": "python tests/validate_starter.py",
+    "typecheck:contracts": "pnpm --filter @switchboard/contracts typecheck"
+  }
+}

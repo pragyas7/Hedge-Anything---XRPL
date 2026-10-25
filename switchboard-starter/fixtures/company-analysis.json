@@ -1,0 +1,86 @@
+{
+  "company": {
+    "companyId": "co_demo_ai",
+    "name": "Demo Support AI (fictional)",
+    "description": "Fictional AI customer-support service that depends on primary model API",
+    "jurisdiction": "US",
+    "baseCurrency": "USD",
+    "monthlyHedgeBudgetUsd": "800",
+    "maxTolerableTailLossUsd": "8000",
+    "cvarAlpha": 0.95,
+    "exposures": [
+      {
+        "exposureId": "exp_inference",
+        "category": "digital",
+        "label": "Inference provider outage and replacement-cost spread",
+        "description": "Loss of traffic and higher fallback inference expenses",
+        "riskFactors": [
+          "primary_outage",
+          "fallback_spread"
+        ],
+        "horizonDays": 30,
+        "scenarioIds": [
+          "normal",
+          "price_spike",
+          "primary_down",
+          "correlated_down"
+        ],
+        "confidence": 0.6
+      }
+    ],
+    "scenarios": [
+      {
+        "scenarioId": "normal",
+        "label": "Normal operations",
+        "probability": 0.85,
+        "baselineLossUsd": "0",
+        "factorShocks": {
+          "primary_outage": 0,
+          "fallback_spread": 0
+        },
+        "source": "synthetic"
+      },
+      {
+        "scenarioId": "price_spike",
+        "label": "Price spike without outage",
+        "probability": 0.1,
+        "baselineLossUsd": "2500",
+        "factorShocks": {
+          "primary_outage": 0,
+          "fallback_spread": 1
+        },
+        "source": "synthetic"
+      },
+      {
+        "scenarioId": "primary_down",
+        "label": "Primary outage; fallback available",
+        "probability": 0.04,
+        "baselineLossUsd": "5000",
+        "factorShocks": {
+          "primary_outage": 1,
+          "fallback_spread": 1
+        },
+        "source": "synthetic"
+      },
+      {
+        "scenarioId": "correlated_down",
+        "label": "Correlated provider outage",
+        "probability": 0.01,
+        "baselineLossUsd": "25000",
+        "factorShocks": {
+          "primary_outage": 1,
+          "fallback_spread": 2
+        },
+        "source": "synthetic"
+      }
+    ],
+    "confirmedByUser": true
+  },
+  "assumptions": [
+    "All company data are fictional. Loss scenarios are synthetic and user-editable.",
+    "Primary and fallback models must pass task-specific equivalence checks."
+  ],
+  "warnings": [
+    "Current amounts are not actuarially calibrated or derived from live market prices."
+  ]
+}

@@ -1,0 +1,1 @@
+Shared TS DTOs for Agent A/B/C. Frozen before parallel work. OpenAPI is the canonical HTTP spec; regenerate and review DTOs if edited. All money encoded as decimal strings. No service-specific implementation inside this package.

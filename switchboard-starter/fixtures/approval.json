@@ -1,0 +1,17 @@
+{
+  "approvalId": "approval_demo_001",
+  "request": {
+    "planId": "plan_sandbox_001",
+    "planHash": "sha256:demo_only_untrusted_digest_replace_in_production",
+    "expiresAt": "2026-11-01T00:00:00Z",
+    "maxTotalSpendUsd": "800",
+    "maxCollateralUsd": "5000",
+    "allowedVenues": [
+      "switchboard",
+      "capacity_provider"
+    ],
+    "ap4mFallbackBudgetUsd": "100"
+  },
+  "status": "PENDING",
+  "method": "app_manual"
+}

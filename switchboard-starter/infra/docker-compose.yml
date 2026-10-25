@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: localonly
+      POSTGRES_DB: switchboard
+    ports: ["5432:5432"]
+    volumes: ["sbpg:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+volumes:
+  sbpg: {}

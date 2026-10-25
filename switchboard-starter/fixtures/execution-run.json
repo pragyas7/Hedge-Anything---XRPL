@@ -1,0 +1,31 @@
+{
+  "runId": "run_demo_001",
+  "planId": "plan_sandbox_001",
+  "approvalId": "approval_demo_001",
+  "status": "PENDING",
+  "orders": [
+    {
+      "clientOrderId": "ord_demo_001",
+      "venueOrderId": "sandbox_001",
+      "status": "SIMULATED",
+      "filledQuantity": "0",
+      "averageFillPriceUsd": "0",
+      "syntheticDemo": true
+    }
+  ],
+  "receipts": [
+    {
+      "receiptId": "receipt_synthetic_001",
+      "kind": "voucher_redeemed",
+      "chainId": 1449000,
+      "transactionHash": "synthetic_not_a_transaction",
+      "confirmed": false,
+      "observedAt": "2026-10-24T22:01:00Z",
+      "metadata": {
+        "demo": "true",
+        "note": "Must replace with real hash and verify payout"
+      }
+    }
+  ],
+  "correlationId": "corr_demo_001"
+}

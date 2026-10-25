@@ -1,0 +1,64 @@
+{
+  "planId": "plan_sandbox_001",
+  "companyId": "co_demo_ai",
+  "version": 1,
+  "status": "QUOTED",
+  "createdAt": "2026-10-24T22:00:01Z",
+  "expiresAt": "2026-11-01T00:00:00Z",
+  "planHash": "sha256:demo_only_untrusted_digest_replace_in_production",
+  "budgetUsd": "800",
+  "estimatedTotalCostUsd": "504",
+  "before": {
+    "expectedLossUsd": "700",
+    "p95LossUsd": "2500",
+    "cvar95LossUsd": "9000",
+    "worstScenarioLossUsd": "25000"
+  },
+  "after": {
+    "expectedLossUsd": "704",
+    "p95LossUsd": "3004",
+    "cvar95LossUsd": "5504",
+    "worstScenarioLossUsd": "15504"
+  },
+  "legs": [
+    {
+      "legId": "leg_fin_1",
+      "kind": "financial",
+      "quoteId": "quote_sb_mock_001",
+      "instrumentId": "sb_sandbox_outage_20261130",
+      "venue": "switchboard",
+      "quantity": "10",
+      "estimatedAllInCostUsd": "204",
+      "maxAdditionalObligationUsd": "0",
+      "payoffByScenarioUsd": {
+        "normal": "0",
+        "price_spike": "0",
+        "primary_down": "10000",
+        "correlated_down": "10000"
+      },
+      "basisRisk": "Outage contract pays for an observed primary outage, but not necessarily for performance degradation or the entire economic loss."
+    },
+    {
+      "legId": "leg_cap_1",
+      "kind": "capacity",
+      "capacityOfferId": "cap_demo_001",
+      "venue": "capacity_provider",
+      "quantity": "1",
+      "estimatedAllInCostUsd": "300",
+      "maxAdditionalObligationUsd": "3000",
+      "payoffByScenarioUsd": {
+        "normal": "0",
+        "price_spike": "0",
+        "primary_down": "0",
+        "correlated_down": "0"
+      },
+      "basisRisk": "Capacity not verified; operational benefits excluded from modeled financial payoff until successfully tested."
+    }
+  ],
+  "rationale": "Illustrative CVaR95-focused plan. The financial payout is modeled in primary and correlated outages; no unverified capacity benefit is counted.",
+  "warnings": [
+    "Synthetic scenario probabilities and instrument quotes. Metrics are computed from these illustrative fixtures, not market forecasts.",
+    "Plan hash is a placeholder and must be replaced with a canonical deterministic SHA-256 before any approval."
+  ],
+  "syntheticDemo": true
+}

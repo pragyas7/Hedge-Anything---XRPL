@@ -1,0 +1,62 @@
+{
+  "companyId": "co_demo_ai",
+  "quotes": [
+    {
+      "quoteId": "quote_sb_mock_001",
+      "instrument": {
+        "instrumentId": "sb_sandbox_outage_20261130",
+        "venue": "switchboard",
+        "name": "Fictional API outage \u2265 15 minutes during November 2026",
+        "riskFactor": "primary_outage",
+        "settlementType": "binary",
+        "eventRule": "Pays if 3 of 5 independent regions each observe >15 consecutive minutes unavailable in defined window; challenge 24h",
+        "resolutionSourceUrl": "https://example.invalid/switchboard/sandbox-resolution",
+        "expiresAt": "2026-11-30T23:59:59Z",
+        "payoutPerUnitUsd": "1000",
+        "maximumPayoutUsd": "1000",
+        "collateralCurrency": "RLUSD",
+        "unitDescription": "One binary contract (synthetic)"
+      },
+      "venue": "switchboard",
+      "capability": "sandbox",
+      "comparison": "proxy",
+      "eligibilityReason": "SANDBOX only; not a regulated live market",
+      "bidUsd": "17",
+      "askUsd": "20",
+      "requestedQuantity": "10",
+      "availableQuantity": "100",
+      "estimatedAllInBuyCostUsd": "204",
+      "fees": {
+        "tradingFeeUsd": "2",
+        "networkFeeUsd": "1",
+        "conversionFeeUsd": "0",
+        "modeledSlippageUsd": "1",
+        "otherFeeUsd": "0"
+      },
+      "quotedAt": "2026-10-24T22:00:00Z",
+      "expiresAt": "2026-11-01T00:00:00Z",
+      "source": "synthetic",
+      "basisRiskDescription": "Objective outage threshold need not correlate exactly with revenue lost from degraded quality."
+    }
+  ],
+  "capacityOffers": [
+    {
+      "offerId": "cap_demo_001",
+      "providerName": "Demo Fallback Merchant (fictional)",
+      "qualifiedTask": "customer support inference compatibility suite v1",
+      "region": "us-east",
+      "throughputPerSecond": 150,
+      "guaranteedPricePerRequestUsd": "0.006",
+      "reservationPremiumUsd": "300",
+      "reservedUntil": "2026-11-30T23:59:59Z",
+      "verifiedCapacity": false,
+      "qualificationBenchmark": "synthetic benchmark; run real canary and load test before guarantee",
+      "capability": "sandbox"
+    }
+  ],
+  "retrievedAt": "2026-10-24T22:00:00Z",
+  "warnings": [
+    "Synthetic quotes. Kalshi/Polymarket US listings not invented.",
+    "Separate venue credentials and actual US eligibility required for live execution."
+  ]
+}
