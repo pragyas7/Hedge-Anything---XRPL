@@ -44,6 +44,8 @@ Tick the approval box and click **Approve hedge**.
 
 > "This is an in-app approval of this exact plan, not a hardware signature. On approve, Switchboard re-quotes. If the price rose or the contracts changed, it stops and asks again."
 
+If asked about Ledger (no device): "Approval is in-app today, and the page says so. The previews at the bottom are the plain-language view a hardware signer would show. Ledger's Agent Intent does not support XRPL EVM yet, so we did not fake it." If the device path in `LEDGER_PLAN.md` was built in time, approve on the Ledger instead and show the memo with the plan hash on the device screen.
+
 ## 2:20 to 2:50. Execution and the agent payment
 
 The slip becomes a receipt: approval, sandbox orders, failover armed, outage drill run, and the XRPL EVM testnet block it read.
