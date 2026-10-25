@@ -19,7 +19,8 @@ const MODEL = "claude-opus-5-5";
 const KALSHI = (process.env.KALSHI_API_BASE ?? "https://external-api.kalshi.com/trade-api/v2").replace(/\/+$/, "");
 const CATALOG_CATEGORY = "Climate and Weather";
 const CATALOG_TTL_MS = 30 * 60_000;
-const DISCOVERY_TIMEOUT_MS = 40_000;
+/** Hard wall-clock limit for one live analysis, well inside the 60 s Vercel function limit. */
+const DISCOVERY_TIMEOUT_MS = 25_000;
 const KALSHI_TIMEOUT_MS = 6_000;
 const TICKER = /^[A-Z0-9][A-Z0-9.\-]{1,63}$/;
 
@@ -179,9 +180,10 @@ export async function askClaude(
     ],
     messages: [{
       role: "user",
-      content: `Business: ${input.description}\nJurisdiction: ${input.jurisdiction}\nMonthly hedge budget: $${input.budget}\nLargest monthly loss they can absorb: $${input.tail}`,
+      content: `Business: ${input.description}\nJurisdiction: ${input.jurisdiction}\nMonthly hedge budget: ${input.budget}\nLargest monthly loss they can absorb: ${input.tail}`,
     }],
-  });
+  }, { signal: AbortSignal.timeout(timeoutMs) });
+  // The client timeout does not bound a stream that keeps sending; the abort signal above is the hard stop.
   const message = await stream.finalMessage();
   if (message.stop_reason === "refusal" || message.stop_reason === "max_tokens") return null;
   const text = message.content.map((block) => (block.type === "text" ? block.text : "")).join("");

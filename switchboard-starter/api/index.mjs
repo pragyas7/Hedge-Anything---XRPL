@@ -225,7 +225,7 @@ var MODEL = "claude-opus-5-5";
 var KALSHI = (process.env.KALSHI_API_BASE ?? "https://external-api.kalshi.com/trade-api/v2").replace(/\/+$/, "");
 var CATALOG_CATEGORY = "Climate and Weather";
 var CATALOG_TTL_MS = 30 * 6e4;
-var DISCOVERY_TIMEOUT_MS = 4e4;
+var DISCOVERY_TIMEOUT_MS = 25e3;
 var KALSHI_TIMEOUT_MS = 6e3;
 var TICKER = /^[A-Z0-9][A-Z0-9.\-]{1,63}$/;
 var CATEGORIES = ["operational", "digital", "climate", "commodity", "supply_chain", "regulatory", "financial", "other"];
@@ -337,10 +337,10 @@ async function askClaude(input, catalog, timeoutMs = DISCOVERY_TIMEOUT_MS) {
       role: "user",
       content: `Business: ${input.description}
 Jurisdiction: ${input.jurisdiction}
-Monthly hedge budget: $${input.budget}
-Largest monthly loss they can absorb: $${input.tail}`
+Monthly hedge budget: ${input.budget}
+Largest monthly loss they can absorb: ${input.tail}`
     }]
-  });
+  }, { signal: AbortSignal.timeout(timeoutMs) });
   const message = await stream.finalMessage();
   if (message.stop_reason === "refusal" || message.stop_reason === "max_tokens") return null;
   const text2 = message.content.map((block) => block.type === "text" ? block.text : "").join("");
