@@ -1,6 +1,13 @@
 # Judge demo script
 
-Live page: https://switchboard-hackathon.vercel.app. About three minutes. Open it on a laptop before you start; the first request after a cold start can take a few seconds.
+About three minutes. Present from the laptop so the Ledger step works. Before you start, in `switchboard-starter`:
+
+```bash
+pnpm ledger:emulator                                   # Docker must be running
+LEDGER_SPECULOS_URL=http://127.0.0.1:5001 pnpm demo    # then open http://127.0.0.1:4110 in Chrome
+```
+
+Click **Run sample** once to warm it up, then reload. The public page, https://switchboard-hackathon.vercel.app, is the backup: same flow, with in-app approval instead of the Ledger.
 
 Figures below are what the sandbox returns for the default inputs. The sandbox order book is shared, so premiums can move slightly after several runs. Read the numbers off the screen, not this page.
 
@@ -40,21 +47,23 @@ On the right, the hedge slip shows the contract, the premium (about $183 of the 
 
 Click **Lowest cost** in the top bar to show it re-price in place, then click **Worst case** again.
 
-Tick the approval box and click **Approve hedge**.
+In the slip, **Ledger** is selected. Point at the hash ending under the button, then click **Approve on Ledger**. The Ledger Stax screen appears in the slip. Click the arrow through the four pages; on page 3, the memo ends in the same characters as the slip. Keep the mouse down on **Hold to sign**.
 
-> "This is an in-app approval of this exact plan, not a hardware signature. On approve, Switchboard re-quotes. If the price rose or the contracts changed, it stops and asks again."
+> "The plan hash is signed on a Ledger running the real XRP app. Our server verifies the signature, the account, and the hash, then puts the approval on XRPL testnet. Only then does anything get ordered. And it re-quotes first: if the price rose or the contracts changed, it stops."
 
-If asked about Ledger (no device): "Approval is in-app today, and the page says so. The previews at the bottom are the plain-language view a hardware signer would show. Ledger's Agent Intent does not support XRPL EVM yet, so we did not fake it." If the device path in `LEDGER_PLAN.md` was built in time, approve on the Ledger instead and show the memo with the plan hash on the device screen.
+This is Speculos, Ledger's official emulator, which the organizers accept in place of a device. Say "Ledger emulator", never "our Ledger device". Ledger's Agent Intent does not support XRPL EVM, so we sign a native XRPL transaction instead.
+
+If the emulator is not running, the slip shows only the in-app approval: tick the box and click **Approve hedge**. Same flow, labeled as not a Ledger signature.
 
 ## 2:20 to 2:50. Execution and the agent payment
 
-The slip becomes a receipt with three beats: the sandbox fill, the primary API going down, and the XRPL EVM testnet block it read. The run trace is behind **Run trace**.
+The slip becomes a receipt: the sandbox fill, the primary API going down, the XRPL EVM testnet block it read, and, after a Ledger approval, a link to the approval transaction on the XRPL testnet explorer. Open that link. The run trace is behind **Run trace**.
 
 Choose the version that matches the day.
 
 **Portal still down:**
 
-> "The orders are simulated sandbox fills. In the outage drill, the agent decides to pay for backup capacity inside the $25 budget the human approved, and signs a mock voucher. The live Mastercard Agent Pay code is built, but the portal is down, so this is not a redeemed voucher or an RLUSD payout, and the page says so."
+> "The orders are simulated sandbox fills. In the outage drill, the agent decides to pay for backup capacity inside the $10 budget the human approved, and signs a mock voucher. The live Mastercard Agent Pay code is built, but the portal is down, so this is not a redeemed voucher or an RLUSD payout, and the page says so."
 
 **Portal back and the live payment ran** (see `AP4M_CHECKLIST.md`, step 4, done before the demo):
 
@@ -62,7 +71,7 @@ Choose the version that matches the day.
 
 ## 2:50 to 3:00. Close
 
-Open **Integrations on this deploy** at the bottom to show the honest status of each sponsor.
+Open **Integrations** at the bottom to show the status of each sponsor. Ledger reads **Emulator connected** with its testnet account.
 
 > "Prediction markets tell you what might happen. Switchboard turns that into a hedge you can approve, and an agent that pays for the backup when it does."
 
@@ -76,5 +85,5 @@ Open **Integrations on this deploy** at the bottom to show the honest status of 
 - Company details and scenario numbers are illustrative templates until a real user supplies them. The default company on screen is Northline Support.
 - Switchboard exchange prices and order books are sandbox. A Kalshi row marked Live public price is a real public quote and is not buyable. If that row is missing, the weather example is synthetic. Polymarket International stays a synthetic reference.
 - Orders are `SIMULATED`. Nothing reaches a live US derivatives venue.
-- Approval is in-app (`app_manual`), not a Ledger signature. Ledger Agent Intent is unsupported on XRPL EVM chain 1449000, and the page says no device is connected.
+- Ledger approval runs on Speculos, Ledger's emulator with the real XRP app, not a physical device. It signs a native XRPL testnet AccountSet; Ledger Agent Intent is unsupported on XRPL EVM chain 1449000. Without the emulator, approval is in-app (`app_manual`) and labeled as not a Ledger signature.
 - An RLUSD payout is claimed only with a real payout transaction from the AP4M settle call.

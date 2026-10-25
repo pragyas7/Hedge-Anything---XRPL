@@ -418,7 +418,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     <div class="inner">
       <ul class="claims">
         <li><strong>Markets.</strong> The hedge fills on the Switchboard sandbox book. A Kalshi row marked Live public price is a real public quote and is not buyable here. Synthetic rows are examples. Nothing is sent to a live US derivatives venue.</li>
-        <li><strong>Mastercard AP4M.</strong> The team name on this process is Penn. Live payment code is present and stays idle until an agent key, <code>AP4M_MODE=live</code>, a 402 resource, and a channel id or cap are set. The failover drill stops at a mock voucher.</li>
+        <li><strong>Mastercard AP4M.</strong> The team name on this process is Penn1. Live payment code is present and stays idle until an agent key, <code>AP4M_MODE=live</code>, a 402 resource, and a channel id or cap are set. The failover drill stops at a mock voucher.</li>
         <li><strong>QuickNode.</strong> The chain read and the PaymentLedger log read use QuickNode only when <code>QUICKNODE_RPC_URL</code> is set. Otherwise both use the public XRPL EVM testnet RPC.</li>
         <li id="claim-ledger"><strong>Ledger.</strong> <code>ledger_agent_intent</code> is unsupported on chain id 1449000. Chain id 1440000 is not used. No device session is open and nothing is signed.</li>
       </ul>
@@ -1137,14 +1137,14 @@ export function renderPage(previews: ClearSignPreview[]): string {
     if (useLedger) {
       go = el('button', { class: 'btn btn-primary btn-lg', type: 'button', id: 'run' }, ['Approve on Ledger']);
       go.addEventListener('click', function () { execute(plan, 'ledger'); });
-      consentBlock = el('p', { class: 'note-line', style: 'font-size:12.5px', text: 'The Ledger shows this plan’s hash, ending in ' + hashEnding(plan.planHash) + '. Check it, then hold to sign. That approves the hedge and a $25 failover budget for a sandbox run.' });
+      consentBlock = el('p', { class: 'note-line', style: 'font-size:12.5px', text: 'The Ledger shows this plan’s hash, ending in ' + hashEnding(plan.planHash) + '. Check it, then hold to sign. That approves the hedge and a $10 failover budget for a sandbox run.' });
     } else {
       var check = el('input', { type: 'checkbox', id: 'consent' });
       go = el('button', { class: 'btn btn-primary btn-lg', type: 'button', id: 'run' }, ['Approve hedge']);
       go.disabled = true;
       check.addEventListener('change', function () { go.disabled = !check.checked || state.busy; });
       go.addEventListener('click', function () { execute(plan, 'app'); });
-      consentBlock = el('label', { class: 'consent', for: 'consent' }, [check, el('span', { text: 'Approve this hedge and a $25 failover budget for a sandbox run. In-app approval, not a Ledger signature.' })]);
+      consentBlock = el('label', { class: 'consent', for: 'consent' }, [check, el('span', { text: 'Approve this hedge and a $10 failover budget for a sandbox run. In-app approval, not a Ledger signature.' })]);
     }
     root.appendChild(el('div', { class: 'slip-sec' }, [
       toggle,
@@ -1239,7 +1239,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     var state = failover && failover.state ? String(failover.state) : '';
     var spend = usd((failover && failover.ap4mSpendingUsd) || '0');
     if (state === 'RLUSD_SETTLED') return 'The agent paid ' + spend + ' and settlement returned an RLUSD payout.';
-    if (state === 'VOUCHER_SIGNED') return 'Inside the $25 budget you approved, the agent signed a mock voucher for backup capacity. No RLUSD moved. Mastercard Agent Pay stays idle until the portal credentials are set.';
+    if (state === 'VOUCHER_SIGNED') return 'Inside the $10 budget you approved, the agent signed a mock voucher for backup capacity. No RLUSD moved. Mastercard Agent Pay stays idle until the portal credentials are set.';
     if (!state) return 'The outage drill did not run.';
     return 'The drill stopped at ' + state.replace(/_/g, ' ').toLowerCase() + '. Agent spend ' + spend + '.';
   }

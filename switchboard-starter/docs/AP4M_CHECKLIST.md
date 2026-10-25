@@ -1,6 +1,6 @@
 # AP4M go-live checklist
 
-The live payment code is already in `services/execution/src/ap4m-live.ts`. Going live is a matter of getting values from the Mastercard hackathon portal, putting them in Vercel, and checking them before the demo. Team name is **Penn**.
+The live payment code is already in `services/execution/src/ap4m-live.ts`. Going live is a matter of getting values from the Mastercard hackathon portal, putting them in Vercel, and checking them before the demo. Team name is **Penn1**.
 
 ## 1. Get these from the portal
 
@@ -12,7 +12,7 @@ The live payment code is already in `services/execution/src/ap4m-live.ts`. Going
 | Merchant (optional) | `AP4M_MERCHANT_ID` | Must not be the agent wallet. |
 | Funded testnet budget | (none) | Fund the agent wallet with testnet RLUSD in the portal. |
 
-Also set `AP4M_MODE=live` and `AP4M_TEAM_NAME=Penn`. The public demo fills in the team name itself, but the check and the pay route below read it from the environment.
+Also set `AP4M_MODE=live` and `AP4M_TEAM_NAME=Penn1`. The public demo fills in the team name itself, but the check and the pay route below read it from the environment.
 
 Leave these alone unless the portal says otherwise: `AP4M_BASE_URL` (defaults to `https://hackathon.ap4m.build`) and `AP4M_PAYMENT_LEDGER` (defaults to the hackathon PaymentLedger).
 
@@ -23,7 +23,7 @@ Project `switchboard-hackathon`, Settings, Environment Variables, Production. Or
 ```bash
 npx vercel env add AP4M_AGENT_PRIVATE_KEY production
 npx vercel env add AP4M_MODE production          # value: live
-npx vercel env add AP4M_TEAM_NAME production     # value: Penn
+npx vercel env add AP4M_TEAM_NAME production     # value: Penn1
 npx vercel env add AP4M_RESOURCE_URL production
 npx vercel env add AP4M_CHANNEL_CAP production   # or AP4M_CHANNEL_ID
 ```

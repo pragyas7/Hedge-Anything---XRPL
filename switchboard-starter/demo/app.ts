@@ -22,7 +22,7 @@ if (Number(process.env.QUOTE_TTL_SECONDS ?? "0") < 900) {
 if (!process.env.KALSHI_ENABLED) process.env.KALSHI_ENABLED = "true";
 if (!process.env.KALSHI_TIMEOUT_MS) process.env.KALSHI_TIMEOUT_MS = "4000";
 if (!(process.env.AP4M_TEAM_NAME ?? "").trim() && !(process.env.TEAM_NAME ?? "").trim()) {
-  process.env.AP4M_TEAM_NAME = "Penn";
+  process.env.AP4M_TEAM_NAME = "Penn1";
 }
 
 const BEARER = process.env.SWITCHBOARD_DEV_BEARER?.trim() || "switchboard-dev-platform-token";
@@ -507,7 +507,8 @@ async function executePlan(
     maxTotalSpendUsd: plan.estimatedTotalCostUsd,
     maxCollateralUsd: plan.budgetUsd,
     allowedVenues: venues,
-    ap4mFallbackBudgetUsd: "25",
+    // Inside the 20 RLUSD AP4M allocation for team Penn1, with room for retries.
+    ap4mFallbackBudgetUsd: "10",
     plan,
   };
   const created = await call(execution, "POST", "/v1/execution/approvals", approvalBody);
@@ -542,7 +543,7 @@ async function executePlan(
     primaryService: PRIMARY,
     fallbackOfferId: "cap_sandbox_standby",
     maxPerTriggerUsd: "10",
-    maxDailySpendUsd: "25",
+    maxDailySpendUsd: "10",
     triggerRuleId: "primary_down",
   });
   steps.push({ name: "arm", status: armed.status, detail: detailOf(armed.body, "arm") });
