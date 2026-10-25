@@ -387,7 +387,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
 <footer class="footer">
   <details>
     <summary>Integrations on this deploy</summary>
-    <div class="inner"><div class="sponsors" id="sponsors">Checking AP4M, QuickNode, AWS, and Ledger…</div></div>
+    <div class="inner"><div class="sponsors" id="sponsors">Checking AP4M, QuickNode, and Ledger…</div></div>
   </details>
   <details>
     <summary>XRPL transactions, previewed before any signature</summary>
@@ -404,7 +404,6 @@ export function renderPage(previews: ClearSignPreview[]): string {
         <li><strong>Markets.</strong> Every price here is synthetic or a sandbox order book. None is a live venue quote, and nothing reaches a live US derivatives venue.</li>
         <li><strong>Mastercard AP4M.</strong> The team name on this process is Penn. Live payment code is present and stays idle until an agent key, <code>AP4M_MODE=live</code>, a 402 resource, and a channel id or cap are set. The failover drill stops at a mock voucher.</li>
         <li><strong>QuickNode.</strong> The chain read and the PaymentLedger log read use QuickNode only when <code>QUICKNODE_RPC_URL</code> is set. Otherwise both use the public XRPL EVM testnet RPC.</li>
-        <li><strong>AWS AgentCore.</strong> <code>GET /ping</code> and <code>POST /invocations</code> answer on this process. <code>deployed</code> stays false. The public invocation route cannot spend until <code>AP4M_ALLOW_PUBLIC_PAY=true</code>.</li>
         <li><strong>Ledger.</strong> <code>ledger_agent_intent</code> is unsupported on chain id 1449000. Chain id 1440000 is not used. No device session is open and nothing is signed.</li>
       </ul>
     </div>
@@ -1224,7 +1223,7 @@ export function renderPage(previews: ClearSignPreview[]): string {
     var grey = 'var(--faint)';
     root.appendChild(sponsor('Mastercard Agent Pay', missing.length ? amber : green, missing.length ? 'Waiting on credentials' : 'Configured, ' + (ap4m.mode || 'mode unknown'), (ap4m.note || '') + (missing.length ? ' Missing: ' + missing.join(', ') + '.' : '')));
     root.appendChild(sponsor('QuickNode', quicknode.provider === 'quicknode' ? green : amber, quicknode.provider === 'quicknode' ? 'Connected' : 'Public RPC instead', (quicknode.label || '') + (typeof quicknode.eventCount === 'number' ? ' VoucherRedeemed logs in the recent window: ' + quicknode.eventCount + '.' : '')));
-    root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
+    if (s.aws) root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
     root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'No device connected', ledger.note || ''));
   }).catch(function () {
     var root = $('sponsors');

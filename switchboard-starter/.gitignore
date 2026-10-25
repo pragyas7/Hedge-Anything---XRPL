@@ -11,3 +11,5 @@ coverage/
 .cache/
 out/
 broadcast/
+.vercel
+.env*

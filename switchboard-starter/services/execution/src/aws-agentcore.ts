@@ -20,6 +20,14 @@ export interface AgentInvocation {
 const REQUIRED = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AGENTCORE_RUNTIME_ARN"] as const;
 
 /**
+ * The AWS sponsor track is parked. The routes and status card stay off unless this flag is set,
+ * so the code below can be switched back on without rewriting it.
+ */
+export function awsAgentCoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AWS_AGENTCORE_ENABLED ?? "").trim().toLowerCase() === "true";
+}
+
+/**
  * Vercel functions set AWS_REGION even when the project has no AWS account.
  * That value counts only after both the access key and the secret are present.
  */

@@ -199,8 +199,15 @@ describe("Ledger and combined sponsor status", () => {
     expect(report.ap4m.present).toContain("team name");
     expect(report.ap4m.missing).toContain("AP4M_MODE=live");
     expect(report.quicknode.provider).toBe("public-xrpl-evm-testnet");
-    expect(report.aws.deployed).toBe(false);
+    expect(report.aws).toBeUndefined();
     expect(report.ledger.signed).toBe(false);
     expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+  it("reports AWS only when the parked track is switched back on", async () => {
+    const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x10" }), { status: 200 });
+    const report = await sponsorStatus({ AWS_AGENTCORE_ENABLED: "true" }, fetchImpl);
+    expect(report.aws?.deployed).toBe(false);
+    expect(report.aws?.missing).toContain("AGENTCORE_RUNTIME_ARN");
   });
 });

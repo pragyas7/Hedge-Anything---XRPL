@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { Decimal } from "decimal.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { renderPage } from "./demo/page.js";
-import { handleInvocation } from "./services/execution/src/aws-agentcore.js";
+import { awsAgentCoreEnabled, handleInvocation } from "./services/execution/src/aws-agentcore.js";
 import { SAMPLE_XRPL_TRANSACTIONS, previewXrplTransaction, type ClearSignPreview } from "./services/execution/src/clear-sign.js";
 import { readNetwork, type NetworkReport } from "./services/execution/src/network.js";
 import { sponsorStatus, type SponsorStatus } from "./services/execution/src/sponsors.js";
@@ -193,39 +193,42 @@ export async function createDemoApp() {
 
   gateway.get("/demo/sponsors", async () => sponsorStatus(process.env));
 
-  gateway.get("/ping", async () => ({
-    status: "Healthy",
-    deployed: false,
-    note: "Local AgentCore HTTP contract on this process. This is not an AWS runtime.",
-  }));
+  /** AWS AgentCore track is parked. Set AWS_AGENTCORE_ENABLED=true to serve these routes again. */
+  if (awsAgentCoreEnabled(process.env)) {
+    gateway.get("/ping", async () => ({
+      status: "Healthy",
+      deployed: false,
+      note: "Local AgentCore HTTP contract on this process. This is not an AWS runtime.",
+    }));
 
-  gateway.post("/invocations", async (request, reply) => {
-    const resourceUrl = isRecord(request.body) && typeof request.body.resourceUrl === "string"
-      ? request.body.resourceUrl
-      : undefined;
-    if (resourceUrl) {
-      let parsed: URL;
-      try {
-        parsed = new URL(resourceUrl);
-      } catch {
-        return reply.code(400).send({
-          protocol: "agentcore-http",
-          pay: false,
-          awsDeployed: false,
-          reason: "resourceUrl must be an https URL.",
-        });
+    gateway.post("/invocations", async (request, reply) => {
+      const resourceUrl = isRecord(request.body) && typeof request.body.resourceUrl === "string"
+        ? request.body.resourceUrl
+        : undefined;
+      if (resourceUrl) {
+        let parsed: URL;
+        try {
+          parsed = new URL(resourceUrl);
+        } catch {
+          return reply.code(400).send({
+            protocol: "agentcore-http",
+            pay: false,
+            awsDeployed: false,
+            reason: "resourceUrl must be an https URL.",
+          });
+        }
+        if (parsed.protocol !== "https:") {
+          return reply.code(400).send({
+            protocol: "agentcore-http",
+            pay: false,
+            awsDeployed: false,
+            reason: "resourceUrl must use https.",
+          });
+        }
       }
-      if (parsed.protocol !== "https:") {
-        return reply.code(400).send({
-          protocol: "agentcore-http",
-          pay: false,
-          awsDeployed: false,
-          reason: "resourceUrl must use https.",
-        });
-      }
-    }
-    return handleInvocation(request.body, invocationEnv());
-  });
+      return handleInvocation(request.body, invocationEnv());
+    });
+  }
 
   gateway.post("/demo/proof", async (request, reply) => {
     const confirmed = isRecord(request.body) && request.body.confirm === true;

@@ -502,7 +502,7 @@ function renderPage(previews) {
 <footer class="footer">
   <details>
     <summary>Integrations on this deploy</summary>
-    <div class="inner"><div class="sponsors" id="sponsors">Checking AP4M, QuickNode, AWS, and Ledger\u2026</div></div>
+    <div class="inner"><div class="sponsors" id="sponsors">Checking AP4M, QuickNode, and Ledger\u2026</div></div>
   </details>
   <details>
     <summary>XRPL transactions, previewed before any signature</summary>
@@ -519,7 +519,6 @@ function renderPage(previews) {
         <li><strong>Markets.</strong> Every price here is synthetic or a sandbox order book. None is a live venue quote, and nothing reaches a live US derivatives venue.</li>
         <li><strong>Mastercard AP4M.</strong> The team name on this process is Penn. Live payment code is present and stays idle until an agent key, <code>AP4M_MODE=live</code>, a 402 resource, and a channel id or cap are set. The failover drill stops at a mock voucher.</li>
         <li><strong>QuickNode.</strong> The chain read and the PaymentLedger log read use QuickNode only when <code>QUICKNODE_RPC_URL</code> is set. Otherwise both use the public XRPL EVM testnet RPC.</li>
-        <li><strong>AWS AgentCore.</strong> <code>GET /ping</code> and <code>POST /invocations</code> answer on this process. <code>deployed</code> stays false. The public invocation route cannot spend until <code>AP4M_ALLOW_PUBLIC_PAY=true</code>.</li>
         <li><strong>Ledger.</strong> <code>ledger_agent_intent</code> is unsupported on chain id 1449000. Chain id 1440000 is not used. No device session is open and nothing is signed.</li>
       </ul>
     </div>
@@ -1339,7 +1338,7 @@ function renderPage(previews) {
     var grey = 'var(--faint)';
     root.appendChild(sponsor('Mastercard Agent Pay', missing.length ? amber : green, missing.length ? 'Waiting on credentials' : 'Configured, ' + (ap4m.mode || 'mode unknown'), (ap4m.note || '') + (missing.length ? ' Missing: ' + missing.join(', ') + '.' : '')));
     root.appendChild(sponsor('QuickNode', quicknode.provider === 'quicknode' ? green : amber, quicknode.provider === 'quicknode' ? 'Connected' : 'Public RPC instead', (quicknode.label || '') + (typeof quicknode.eventCount === 'number' ? ' VoucherRedeemed logs in the recent window: ' + quicknode.eventCount + '.' : '')));
-    root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
+    if (s.aws) root.appendChild(sponsor('AWS AgentCore', aws.deployed ? green : amber, aws.deployed ? 'Deployed' : 'Local contract only', aws.note || ''));
     root.appendChild(sponsor('Ledger', ledger.signed ? green : grey, ledger.signed ? 'Signed' : 'No device connected', ledger.note || ''));
   }).catch(function () {
     var root = $('sponsors');
@@ -1792,6 +1791,9 @@ async function runAp4mPayment(env = process.env, options = {}) {
 
 // services/execution/src/aws-agentcore.ts
 var REQUIRED = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AGENTCORE_RUNTIME_ARN"];
+function awsAgentCoreEnabled(env = process.env) {
+  return (env.AWS_AGENTCORE_ENABLED ?? "").trim().toLowerCase() === "true";
+}
 function regionValue(env) {
   const explicit = (env.SWITCHBOARD_AWS_REGION ?? "").trim();
   if (explicit) return explicit;
@@ -2200,7 +2202,7 @@ async function sponsorStatus(env = process.env, fetchImpl = fetch) {
   return {
     ap4m: ap4mReadiness(env),
     quicknode,
-    aws: awsSponsorStatus(env),
+    ...awsAgentCoreEnabled(env) ? { aws: awsSponsorStatus(env) } : {},
     ledger
   };
 }
@@ -6236,36 +6238,38 @@ async function createDemoApp() {
     previews: SAMPLE_XRPL_TRANSACTIONS.map((tx) => previewXrplTransaction(tx))
   }));
   gateway2.get("/demo/sponsors", async () => sponsorStatus(process.env));
-  gateway2.get("/ping", async () => ({
-    status: "Healthy",
-    deployed: false,
-    note: "Local AgentCore HTTP contract on this process. This is not an AWS runtime."
-  }));
-  gateway2.post("/invocations", async (request, reply) => {
-    const resourceUrl = isRecord6(request.body) && typeof request.body.resourceUrl === "string" ? request.body.resourceUrl : void 0;
-    if (resourceUrl) {
-      let parsed;
-      try {
-        parsed = new URL(resourceUrl);
-      } catch {
-        return reply.code(400).send({
-          protocol: "agentcore-http",
-          pay: false,
-          awsDeployed: false,
-          reason: "resourceUrl must be an https URL."
-        });
+  if (awsAgentCoreEnabled(process.env)) {
+    gateway2.get("/ping", async () => ({
+      status: "Healthy",
+      deployed: false,
+      note: "Local AgentCore HTTP contract on this process. This is not an AWS runtime."
+    }));
+    gateway2.post("/invocations", async (request, reply) => {
+      const resourceUrl = isRecord6(request.body) && typeof request.body.resourceUrl === "string" ? request.body.resourceUrl : void 0;
+      if (resourceUrl) {
+        let parsed;
+        try {
+          parsed = new URL(resourceUrl);
+        } catch {
+          return reply.code(400).send({
+            protocol: "agentcore-http",
+            pay: false,
+            awsDeployed: false,
+            reason: "resourceUrl must be an https URL."
+          });
+        }
+        if (parsed.protocol !== "https:") {
+          return reply.code(400).send({
+            protocol: "agentcore-http",
+            pay: false,
+            awsDeployed: false,
+            reason: "resourceUrl must use https."
+          });
+        }
       }
-      if (parsed.protocol !== "https:") {
-        return reply.code(400).send({
-          protocol: "agentcore-http",
-          pay: false,
-          awsDeployed: false,
-          reason: "resourceUrl must use https."
-        });
-      }
-    }
-    return handleInvocation(request.body, invocationEnv());
-  });
+      return handleInvocation(request.body, invocationEnv());
+    });
+  }
   gateway2.post("/demo/proof", async (request, reply) => {
     const confirmed = isRecord6(request.body) && request.body.confirm === true;
     if (!confirmed) {
