@@ -778,17 +778,29 @@ export function renderPage(previews: ClearSignPreview[]): string {
       var sum = scenarioSum(company);
       var badLoss = company.scenarios.some(function (scenario) { return !MONEY.test(String(scenario.baselineLossUsd)); });
       var badSum = !isFinite(sum) || Math.abs(sum - 1) > 0.001;
-      if (badSum) check.appendChild(message('warn', 'Chances add up to ' + pct(sum || 0) + '%. Make them 100%.'));
+      if (badSum) check.appendChild(message('warn', 'Chances add up to ' + pct(sum || 0) + '%. Lower one so they total 100%.'));
       if (badLoss) check.appendChild(message('warn', 'Each loss needs to be a plain number, like 5000.'));
       go.disabled = badSum || badLoss;
     }
 
-    var cells = company.scenarios.map(function (scenario) {
+    // The no-loss scenario (normal month) absorbs edits to the others, so the chances keep adding to 100%.
+    var baseIndex = company.scenarios.findIndex(function (scenario) { return Number(scenario.baselineLossUsd) === 0; });
+    var chanceInputs = [];
+    function rebalance(editedIndex) {
+      if (baseIndex < 0 || editedIndex === baseIndex) return;
+      var others = company.scenarios.reduce(function (sum, scenario, index) { return index === baseIndex ? sum : sum + Number(scenario.probability); }, 0);
+      if (!isFinite(others) || others > 1) return;
+      company.scenarios[baseIndex].probability = Math.round((1 - others) * 10000) / 10000;
+      if (chanceInputs[baseIndex]) chanceInputs[baseIndex].value = String(pct(company.scenarios[baseIndex].probability));
+    }
+    var cells = company.scenarios.map(function (scenario, scenarioIndex) {
       var chance = el('input', { type: 'text', inputmode: 'decimal', value: String(pct(Number(scenario.probability))), 'aria-label': 'Chance of ' + scenario.label + ' in a month, percent' });
+      chanceInputs.push(chance);
       chance.addEventListener('input', function () {
         var value = Number(chance.value);
         scenario.probability = chance.value.trim() === '' || !isFinite(value) ? NaN : Math.round(value * 100) / 10000;
         chance.setAttribute('aria-invalid', String(!isFinite(scenario.probability)));
+        rebalance(scenarioIndex);
         refresh();
       });
       var loss = el('input', { type: 'text', inputmode: 'decimal', value: String(scenario.baselineLossUsd), 'aria-label': 'Loss if ' + scenario.label + ' happens, USD' });
